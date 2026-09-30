@@ -8,7 +8,7 @@
   "addOns": {
     "common": {
       "name": "JSON Resume",
-      "logoUrl": "https://raw.githubusercontent.com/jsonresume/jsonresume.org/master/apps/registry/public/favicon.ico"
+      "logoUrl": "https://avatars.githubusercontent.com/u/7943272?s=200&v=4"
     },
     "flows": {
       "workflowElements": [
@@ -18,37 +18,57 @@
           "name": "Load JSON Resume",
           "description": "Fetches a resume.json in the jsonresume.org standard from any HTTPS URL - the JSON Resume registry, a GitHub or GitLab raw file, or your own host - and emits it as structured outputs for later steps to use.",
           "workflowAction": {
-            "inputs": [],
+            "inputs": [
+              {
+                "id": "resumeUrl",
+                "description": "URL of your resume.json in the jsonresume.org standard. The registry (https://registry.jsonresume.org/<username>.json), a GitHub/GitLab raw file, or any HTTPS URL serving the schema.",
+                "cardinality": "SINGLE",
+                "required": true,
+                "dataType": {
+                  "basicType": "STRING"
+                }
+              }
+            ],
             "outputs": [
               {
                 "id": "resume",
                 "description": "The raw resume.json document, as a JSON string.",
                 "cardinality": "SINGLE",
-                "dataType": { "basicType": "STRING" }
+                "dataType": {
+                  "basicType": "STRING"
+                }
               },
               {
                 "id": "resumeText",
                 "description": "The resume flattened to plain text, ready to pass to an AI step as context.",
                 "cardinality": "SINGLE",
-                "dataType": { "basicType": "STRING" }
+                "dataType": {
+                  "basicType": "STRING"
+                }
               },
               {
                 "id": "name",
                 "description": "basics.name from the resume, for addressing replies.",
                 "cardinality": "SINGLE",
-                "dataType": { "basicType": "STRING" }
+                "dataType": {
+                  "basicType": "STRING"
+                }
               },
               {
                 "id": "label",
                 "description": "basics.label - the headline, e.g. \"Principal Software Engineer\".",
                 "cardinality": "SINGLE",
-                "dataType": { "basicType": "STRING" }
+                "dataType": {
+                  "basicType": "STRING"
+                }
               },
               {
                 "id": "email",
                 "description": "basics.email from the resume.",
                 "cardinality": "SINGLE",
-                "dataType": { "basicType": "STRING" }
+                "dataType": {
+                  "basicType": "STRING"
+                }
               }
             ],
             "onConfigFunction": "onConfigLoadJsonResume",

@@ -33,25 +33,36 @@ var TEXT_SECTIONS = ['work', 'projects', 'education', 'skills', 'certificates', 
 /**
  * Builds the configuration card.
  *
- * ONE FIELD ON PURPOSE. The whole promise of this step is "point it at your
- * resume.json and it works", so anything else asked here is friction. The hint
- * names the three sources people actually have.
+ * TAKES NO EVENT PARAMETER, and does not prefill. An earlier version read saved
+ * values out of `event.commonEventObject.formInputs` — that was wrong on both
+ * counts. Every Studio example declares this callback bare
+ * (`function onConfigFunctionCreateDocument() {`), and no Studio page uses
+ * `setValue` to restore a field. Persistence is Studio's job, done through the
+ * `setFieldName` <-> manifest `inputs[].id` binding below; the card only has to
+ * describe the field.
+ *
+ * ONE FIELD ON PURPOSE. The promise of this step is "point it at your
+ * resume.json and it works", so anything else asked here is friction.
  */
-function onConfigLoadJsonResume(event) {
-  var saved = (event && event.commonEventObject && event.commonEventObject.formInputs) || {};
-  var current = readStringInput(saved, 'resumeUrl');
-
+function onConfigLoadJsonResume() {
   var urlInput = CardService.newTextInput()
-    .setFieldName('resumeUrl')
+    .setFieldName('resumeUrl') // MUST equal the manifest inputs[].id — that binding is
+                               // what delivers the value to onExecuteFunction.
     .setTitle('Your JSON Resume URL')
     .setHint(
       'https://registry.jsonresume.org/<username>.json  ·  ' +
       'https://raw.githubusercontent.com/<user>/<repo>/main/resume.json  ·  ' +
       'or any HTTPS URL serving the jsonresume.org schema'
+    )
+    // Lets the user pipe a variable from an EARLIER step into this field instead
+    // of typing a literal URL — e.g. a URL an upstream step looked up. Every
+    // Studio example attaches this to its TextInput; without it the field only
+    // accepts hand-typed text.
+    .setHostAppDataSource(
+      CardService.newHostAppDataSource().setWorkflowDataSource(
+        CardService.newWorkflowDataSource().setIncludeVariables(true)
+      )
     );
-  if (current) {
-    urlInput.setValue(current);
-  }
 
   var section = CardService.newCardSection()
     .addWidget(
@@ -69,6 +80,7 @@ function onConfigLoadJsonResume(event) {
     .build();
 }
 
+
 /**
  * Runs when the step executes.
  *
@@ -78,12 +90,26 @@ function onConfigLoadJsonResume(event) {
  * the user nothing.
  */
 function onExecuteLoadJsonResume(event) {
-  var inputs = (event && event.commonEventObject && event.commonEventObject.formInputs) || {};
-  var url = readStringInput(inputs, 'resumeUrl');
+  // DUMP THE EVENT FIRST. Reading the wrong object is the defining bug of this
+  // platform's steps, and the only way to settle it is empirically: this line
+  // puts the real payload in the Apps Script Executions view on run one, so a
+  // future shape change is diagnosed in seconds instead of argued about. The
+  // quickstart's own sample does the same thing.
+  console.log('LoadJsonResume event: ' + JSON.stringify(event));
+
+  // THE STUDIO PATH, not the generic add-on one. A step execution delivers its
+  // configured values at event.workflow.actionInvocation.inputs — NOT at
+  // event.commonEventObject.formInputs, which at execute time holds only
+  // timeZone / userLocale / hostApp / platform and no formInputs key at all.
+  // Reading the wrong object is silent: the URL comes back empty and the user
+  // sees "no URL is configured" while looking at the URL they typed.
+  var inputs = (event && event.workflow && event.workflow.actionInvocation &&
+                event.workflow.actionInvocation.inputs) || {};
+  var url = readActionInput(inputs, 'resumeUrl');
 
   var problem = validateUrl(url);
   if (problem) {
-    return outputs('', 'Could not load resume: ' + problem, '', '', '');
+    return failStep('Could not load resume: ' + problem);
   }
 
   var raw;
@@ -97,16 +123,16 @@ function onExecuteLoadJsonResume(event) {
     });
     var status = response.getResponseCode();
     if (status < 200 || status >= 300) {
-      return outputs('', 'Could not load resume: the URL returned HTTP ' + status + '.', '', '', '');
+      return failStep('Could not load resume: the URL returned HTTP ' + status + '.');
     }
     raw = response.getContentText();
   } catch (err) {
-    return outputs('', 'Could not load resume: ' + err.message, '', '', '');
+    return failStep('Could not load resume: ' + err.message);
   }
 
   if (raw.length > MAX_BYTES) {
-    return outputs('', 'Could not load resume: the document exceeds the ' +
-      Math.round(MAX_BYTES / 1024 / 1024) + ' MB limit.', '', '', '');
+    return failStep('Could not load resume: the document exceeds the ' +
+      Math.round(MAX_BYTES / 1024 / 1024) + ' MB limit.');
   }
 
   var resume;
@@ -118,18 +144,18 @@ function onExecuteLoadJsonResume(event) {
     var hint = raw.slice(0, 200).indexOf('<') === 0
       ? ' The URL returned HTML, not JSON — if this is a GitHub or GitLab link, use the "raw" URL.'
       : '';
-    return outputs('', 'Could not load resume: the document is not valid JSON.' + hint, '', '', '');
+    return failStep('Could not load resume: the document is not valid JSON.' + hint);
   }
 
   if (!resume || typeof resume !== 'object' || Array.isArray(resume)) {
-    return outputs('', 'Could not load resume: the document is not a JSON object.', '', '', '');
+    return failStep('Could not load resume: the document is not a JSON object.');
   }
   // Shape check, not full schema validation. Every field in JSON Resume is
   // optional, so the only honest assertion is that at least one known section
   // is present — a stricter gate would reject legitimate sparse resumes.
   if (!hasAnyKnownSection(resume)) {
-    return outputs('', 'Could not load resume: no jsonresume.org sections found ' +
-      '(expected at least one of basics, work, education, skills, projects).', '', '', '');
+    return failStep('Could not load resume: no jsonresume.org sections found ' +
+      '(expected at least one of basics, work, education, skills, projects).');
   }
 
   var basics = (resume.basics && typeof resume.basics === 'object') ? resume.basics : {};
@@ -142,8 +168,14 @@ function onExecuteLoadJsonResume(event) {
   );
 }
 
-/** Every declared output, every time. See onExecuteLoadJsonResume. */
-function outputs(resume, resumeText, name, label, email) {
+/**
+ * Every declared output, every time — as a PLAIN MAP.
+ *
+ * Split from the Apps Script envelope below on purpose: this half is pure
+ * JavaScript and can therefore be tested off Google's servers, which is where
+ * the output contract actually gets checked.
+ */
+function buildOutputs(resume, resumeText, name, label, email) {
   return {
     resume: resume,
     resumeText: resumeText,
@@ -151,6 +183,51 @@ function outputs(resume, resumeText, name, label, email) {
     label: label,
     email: email
   };
+}
+
+/**
+ * Fails the step with a message the USER can read in the flow's Activity tab.
+ *
+ * The first version smuggled the reason into `resumeText` and returned success.
+ * That is wrong twice over: the flow carries on as if it had a resume, and the
+ * Activity tab — the only place a non-developer looks — shows nothing but the
+ * step's name. ACTIONABLE + NOT_RETRYABLE is the honest pair here: every failure
+ * this step can have (no URL, bad URL, not JSON, not a resume) is fixed by the
+ * user editing their configuration, and none of them get better on a retry.
+ */
+function failStep(message) {
+  var workflowAction = AddOnsResponseService.newReturnElementErrorAction()
+    .setErrorLog(
+      AddOnsResponseService.newWorkflowTextFormat().addTextFormatElement(
+        AddOnsResponseService.newTextFormatElement().setText(message)
+      )
+    )
+    .setErrorActionability(AddOnsResponseService.ErrorActionability.ACTIONABLE)
+    .setErrorRetryability(AddOnsResponseService.ErrorRetryability.NOT_RETRYABLE);
+  var hostAppAction = AddOnsResponseService.newHostAppAction().setWorkflowAction(workflowAction);
+  return AddOnsResponseService.newRenderActionBuilder().setHostAppAction(hostAppAction).build();
+}
+
+/**
+ * Wraps the output map in what Workspace Studio actually expects back.
+ *
+ * NOT a plain object. A step returns a RenderAction carrying a
+ * ReturnOutputVariablesAction; returning the bare map errors the step. Verified
+ * against Google's own examples, which use
+ * `AddOnsResponseService.newVariableData().addStringValue(...)` and
+ * `newReturnOutputVariablesAction().setVariableDataMap(...)`.
+ */
+function outputs(resume, resumeText, name, label, email) {
+  var plain = buildOutputs(resume, resumeText, name, label, email);
+  var variableDataMap = {};
+  Object.keys(plain).forEach(function (key) {
+    variableDataMap[key] = AddOnsResponseService.newVariableData().addStringValue(plain[key]);
+  });
+
+  var workflowAction = AddOnsResponseService.newReturnOutputVariablesAction()
+    .setVariableDataMap(variableDataMap);
+  var hostAppAction = AddOnsResponseService.newHostAppAction().setWorkflowAction(workflowAction);
+  return AddOnsResponseService.newRenderActionBuilder().setHostAppAction(hostAppAction).build();
 }
 
 /**
@@ -252,18 +329,25 @@ function headlineFor(key, item) {
 }
 
 /**
- * Reads one text value out of a Workspace Studio formInputs payload.
+ * Reads one configured value out of a Studio action-invocation payload.
  *
- * The shape is nested — formInputs[field].stringInputs.value is an ARRAY — and
- * getting it wrong is the classic silent bug here: the field reads as empty and
- * the step reports "no URL is configured" while the user can plainly see one.
+ * The entry carries a TYPED ARRAY keyed by basic type — `stringValues` for a
+ * STRING input, `integerValues` for an INTEGER — matching the manifest's
+ * declared dataType. Google's calculator does exactly this:
+ *
+ *   event.workflow.actionInvocation.inputs["value1"].integerValues[0]
+ *
+ * Note this is NOT the generic add-on card shape
+ * (`formInputs[field].stringInputs.value[0]`). That one is real, and correct for
+ * a Gmail or Chat card callback — it is simply a different object than a Studio
+ * step execution delivers.
  */
-function readStringInput(formInputs, field) {
-  var entry = formInputs && formInputs[field];
+function readActionInput(inputs, id) {
+  var entry = inputs && inputs[id];
   if (!entry) return '';
-  var values = entry.stringInputs && entry.stringInputs.value;
-  if (Array.isArray(values) && values.length) return str(values[0]).trim();
-  if (typeof entry === 'string') return entry.trim(); // tolerate a flattened payload
+  if (Array.isArray(entry.stringValues) && entry.stringValues.length) {
+    return str(entry.stringValues[0]).trim();
+  }
   return '';
 }
 

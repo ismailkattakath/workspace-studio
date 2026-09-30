@@ -32,7 +32,16 @@ const src = readFileSync(join(here, 'LoadJsonResume.gs'), 'utf8');
 // functions that use them are never called here. A ReferenceError would mean
 // something under test had reached for a global it should not.
 const ctx = createContext({ console, fetch, AbortSignal });
-runInContext(src, ctx, { filename: 'LoadJsonResume.gs' });
+// Parsing the file IS the first test. A syntax error here used to surface as a
+// bare Node crash with no context; an edit that breaks the .gs must fail loudly
+// and say where, not look like a harness problem.
+try {
+  runInContext(src, ctx, { filename: 'LoadJsonResume.gs' });
+  console.log('  ok   LoadJsonResume.gs parses');
+} catch (e) {
+  console.log(`  FAIL LoadJsonResume.gs does not parse — ${e.message}`);
+  process.exit(1);
+}
 
 const failures = [];
 const check = (name, cond, detail = '') => {
@@ -49,18 +58,36 @@ check('accepts an @ in the PATH, not the host',
   ctx.validateUrl('https://example.com/@scope/resume.json') === '',
   ctx.validateUrl('https://example.com/@scope/resume.json'));
 
-// ---- formInputs shape ------------------------------------------------------
-// The nested shape is the classic silent bug: read it wrong and the field looks
-// empty while the user can see a value in the card.
-check('reads the nested Workspace Studio shape',
-  ctx.readStringInput({ resumeUrl: { stringInputs: { value: ['https://a/r.json'] } } }, 'resumeUrl') === 'https://a/r.json');
+// ---- Studio action-invocation shape ---------------------------------------
+// THESE TESTS USED TO ENCODE THE BUG. They asserted the generic add-on card
+// shape, formInputs[field].stringInputs.value[0] — which is a real shape, just
+// not the one a Studio step execution delivers — so they passed while the step
+// could never have read its URL in production. A test that agrees with the code
+// about the wrong thing is worse than no test. They now assert the payload
+// Google's own calculator reads:
+//   event.workflow.actionInvocation.inputs["value1"].integerValues[0]
+const invocation = (inputs) => ({ workflow: { actionInvocation: { inputs } } });
+const readFromEvent = (ev, id) => {
+  const inputs = (ev && ev.workflow && ev.workflow.actionInvocation && ev.workflow.actionInvocation.inputs) || {};
+  return ctx.readActionInput(inputs, id);
+};
+
+check('reads stringValues from an action invocation',
+  readFromEvent(invocation({ resumeUrl: { stringValues: ['https://a/r.json'] } }), 'resumeUrl') === 'https://a/r.json');
 check('trims whitespace',
-  ctx.readStringInput({ resumeUrl: { stringInputs: { value: ['  https://a/r.json  '] } } }, 'resumeUrl') === 'https://a/r.json');
-check('missing field yields empty string', ctx.readStringInput({}, 'resumeUrl') === '');
-check('empty value array yields empty string',
-  ctx.readStringInput({ resumeUrl: { stringInputs: { value: [] } } }, 'resumeUrl') === '');
-check('tolerates a flattened string payload',
-  ctx.readStringInput({ resumeUrl: 'https://a/r.json' }, 'resumeUrl') === 'https://a/r.json');
+  readFromEvent(invocation({ resumeUrl: { stringValues: ['  https://a/r.json  '] } }), 'resumeUrl') === 'https://a/r.json');
+check('missing field yields empty string', readFromEvent(invocation({}), 'resumeUrl') === '');
+check('empty stringValues array yields empty string',
+  readFromEvent(invocation({ resumeUrl: { stringValues: [] } }), 'resumeUrl') === '');
+check('a missing workflow envelope does not throw', readFromEvent({}, 'resumeUrl') === '');
+check('an undefined event does not throw', readFromEvent(undefined, 'resumeUrl') === '');
+
+// REGRESSION GUARD. The old generic-card payload must NOT satisfy the reader —
+// if it ever does again, the wrong-object bug has come back.
+check('the generic formInputs shape is NOT accepted',
+  ctx.readActionInput({ resumeUrl: { stringInputs: { value: ['https://a/r.json'] } } }, 'resumeUrl') === '');
+check('an integer input does not masquerade as a string',
+  ctx.readActionInput({ n: { integerValues: [2] } }, 'n') === '');
 
 // ---- section shape check ---------------------------------------------------
 check('accepts a sparse but valid resume', ctx.hasAnyKnownSection({ basics: { name: 'A' } }) === true);
@@ -70,7 +97,9 @@ check('rejects an unrelated object', ctx.hasAnyKnownSection({ hello: 'world' }) 
 // ---- outputs contract ------------------------------------------------------
 // Workspace Studio errors the step unless EVERY declared output comes back.
 const declared = ['resume', 'resumeText', 'name', 'label', 'email'];
-const got = ctx.outputs('a', 'b', 'c', 'd', 'e');
+// buildOutputs is the pure half; outputs() wraps it in AddOnsResponseService,
+// which only exists on Google's servers and so cannot be exercised here.
+const got = ctx.buildOutputs('a', 'b', 'c', 'd', 'e');
 check('returns exactly the declared outputs',
   declared.every(k => k in got) && Object.keys(got).length === declared.length,
   JSON.stringify(Object.keys(got)));

@@ -75,19 +75,82 @@ fetched from the live registry**, not fixtures written to match the code.
 
 ## Notes from building it
 
-- **`formInputs` is nested.** The value is at `formInputs[field].stringInputs.value`, and it is
-  an **array**. Read it wrong and the field silently reads as empty while the user can plainly
-  see the value they typed in the card. That is the single likeliest bug in any Studio step, so
-  it has its own tests.
-- **`onExecuteFunction` must return every declared output**, or Workspace Studio errors the
-  step. Every failure path here still returns the full set, with the reason in `resumeText` —
-  an error the user can read beats an exception that tells them nothing.
-- **Shape check, not schema validation.** Every field in JSON Resume is optional, so the only
-  honest assertion is that at least one known section exists. A stricter gate would reject
-  legitimate sparse résumés.
-- **HTTPS only, no credentials in the URL.** A configuration field is user-supplied; plain
-  `http` would send the request in the clear, and a `user:pass@host` URL would put a secret into
-  a stored step configuration.
-- **HTML instead of JSON gets a specific error.** The commonest mistake is pasting a GitHub
-  *page* URL rather than the raw one, so that case is named rather than surfaced as a parser
-  error.
+These were **wrong in the first version** and are corrected here. The first draft of this file
+presented the wrong shape as a hard-won lesson, which is worse than saying nothing — it would
+have stopped the next person re-checking.
+
+- **A Studio step does NOT read `commonEventObject.formInputs`.** That shape is real and correct
+  for a Gmail or Chat card callback, and it is the wrong object here. A step execution delivers
+  its configured values at `event.workflow.actionInvocation.inputs[id].stringValues[0]` — typed
+  arrays keyed by the manifest's declared `dataType`. At execute time `commonEventObject` holds
+  only `timeZone`, `userLocale`, `hostApp` and `platform`; there is no `formInputs` key at all.
+  Google's calculator reads `…inputs["value1"].integerValues[0]`.
+- **A configuration field must be declared in the manifest's `inputs[]`.** There is no
+  "config-only field". The card's `setFieldName('x')` binds to `inputs[].id === 'x'`, and that
+  binding *is* the delivery channel — Google's own sample carries the comment
+  `//"FieldName" must match an "id" in the manifest file's inputs[] array.` With `"inputs": []`
+  the widget is an orphan and the typed value has nowhere to arrive.
+- **`onConfigFunction` takes no event parameter and does not prefill.** Every Studio example
+  declares it bare. No Studio page uses `setValue` to restore a saved field — Studio re-renders
+  saved values itself through the binding above.
+- **`onExecuteFunction` must return a `RenderAction`, not a plain object.** Wrap the outputs in
+  `AddOnsResponseService.newReturnOutputVariablesAction().setVariableDataMap(...)`. Returning a
+  bare `{id: value}` map errors the step.
+- **Fail with `newReturnElementErrorAction().setErrorLog(...)`.** Writing the reason into a
+  string output and returning success is wrong twice: the flow continues as though it has a
+  résumé, and the Activity tab — the only place a non-developer looks — shows nothing but the
+  step's name.
+- **`setHostAppDataSource(...setIncludeVariables(true))` on the TextInput**, or the user cannot
+  pipe a variable from an earlier step into the field.
+- **Shape check, not schema validation.** Every JSON Resume field is optional, so the only
+  honest assertion is that one known section exists. A stricter gate rejects sparse résumés.
+- **HTTPS only, no credentials in the URL**, and name the HTML-instead-of-JSON case explicitly —
+  pasting a GitHub *page* URL rather than the raw one is the commonest mistake.
+
+### Why the tests did not catch any of this
+
+They asserted the same wrong shape the code used. Green, self-consistent, and proving nothing
+about the platform. **A test that agrees with the code about the wrong thing is worse than no
+test.** They now assert the `actionInvocation` payload and carry two regression guards: the old
+`formInputs` shape must be *rejected*, and an integer input must not masquerade as a string.
+
+## Deploying it — the honest path
+
+**Platform status:** Workspace Studio custom steps are **generally available** (announced
+September 2026). No platform blocker.
+
+**Check this before writing any more code:** custom steps are **OFF by default**. A super-admin
+must enable them at *Admin console → Apps → Google Workspace → Workspace Studio: Custom steps
+settings*, and there is a separate *Approvals* control. No developer doc mentions this; it is
+the likeliest day-one blocker. You also need an eligible edition (Business, Enterprise or
+Education — a personal `@gmail.com` needs Workspace Experiments), flows allowed, and Gemini
+enabled.
+
+**No Google Cloud project is needed** for a step. That requirement applies to *starters*, which
+post to the Workspace Studio API. This add-on requests one scope, `script.external_request`.
+
+**Use the web editor for the first run, not `clasp`.** `clasp` is in nixpkgs as
+`nixpkgs#google-clasp` (note: `nixpkgs#clasp` is a different program entirely), but it
+**cannot create the test deployment** — *Deploy → Test deployments → Install* is editor-UI only
+and has no API. So clasp saves nothing on the critical path and costs a login. Adopt it after
+first light, when `clasp push` beats re-pasting.
+
+1. Create an Apps Script project, runtime **V8**.
+2. Project Settings → tick *Show `appsscript.json` manifest file in editor*.
+3. Paste `appsscript.json` and `LoadJsonResume.gs`.
+4. **Deploy → Test deployments → Install → Done.**
+5. Refresh Workspace Studio and authorise the add-on.
+
+**First-run flow that gives an unambiguous verdict:** *starter → Load JSON Resume → Notify me in
+Chat*, with `name`, `label` and `resumeText` as variable chips in the message.
+
+| What you see | Meaning |
+|---|---|
+| The real name and headline from your résumé | **works** |
+| The `resumeUrl` field never appears, or won't persist | the input is not declared in `inputs[]` |
+| Step errors, or outputs are unavailable as chips | the return shape is wrong |
+| `…returned HTML, not JSON…` or `HTTP 404` | code is fine — **your URL is wrong** |
+
+**Where to look when it fails:** Apps Script editor → **Executions** first; `onExecute` logs the
+entire event object as its first statement, so the real payload is visible on run one. Then the
+flow's **Activity** tab for the user-facing error.
