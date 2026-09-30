@@ -1,0 +1,78 @@
+# CI for the ingestion pipeline.
+#
+# WHAT THIS CAN AND CANNOT CHECK, stated up front so nobody reads a green tick
+# as more than it is:
+#
+#   CAN  — the flake evaluates, the ingest app builds, and the chunker contract
+#          tests pass. Those tests are the ones that actually caught bugs: an
+#          infinite loop, a fragment explosion, and a runt filter that silently
+#          deleted content. All three are pure-Python and need no services.
+#
+#   CANNOT — retrieval quality. `./bench.sh` needs Postgres + pgvector + an
+#          Ollama model, and the model alone is a multi-gigabyte pull per run.
+#          Standing that up on a hosted runner would cost more than it proves,
+#          and it would prove it against a DIFFERENT corpus than the real store.
+#          The benchmark stays a local gate (CLAUDE.md § Verifying a change) and
+#          this file does not pretend otherwise.
+#
+# CONVENTIONS COPIED, NOT INVENTED: action SHAs pinned with a version comment,
+# DeterminateSystems/determinate-nix-action, least-privilege permissions,
+# cancel-in-progress concurrency, and the "stage tree" step — all follow
+# kattakath/nix-config's .github/workflows, which is the precedent this fleet
+# already runs on.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: flake + contract tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: DeterminateSystems/determinate-nix-action@8d87e8d5e5b8a8309d4281094560f127d9a265f1 # v3.22.5
+
+      # Flakes evaluate the GIT TREE, not the working directory, so anything
+      # untracked is invisible to every nix command below. Staging first is what
+      # makes a PR that adds a file actually get checked.
+      - name: Stage tree (git purity)
+        run: git add -A
+
+      - name: Evaluate the flake
+        run: nix flake check --no-build
+
+      - name: Build the ingest app
+        run: nix build .#ingest --no-link --print-out-paths
+
+      # The real gate. These assert this repo's own policy (runts are coalesced,
+      # never dropped) and keep two regression inputs pointed at whatever
+      # implements the split — a pinned dependency can change behaviour across
+      # versions without failing anything loudly.
+      - name: Chunker contract tests
+        run: nix develop --command python3 test_chunk.py
+
+      # Extraction is the layer most likely to break without any code change,
+      # because it depends on a third party's HTML. A dry run writes nothing and
+      # touches no database; it just proves pages still yield an article body.
+      #
+      # NON-BLOCKING ON PURPOSE: this reaches the public internet, so a network
+      # blip or an upstream redesign would otherwise fail a PR that changed
+      # nothing. It is a signal to read, not a gate to satisfy.
+      - name: Extraction smoke test (advisory)
+        continue-on-error: true
+        run: |
+          nix run .#ingest -- \
+            https://developers.google.com/workspace/add-ons/studio \
+            --collection ci-smoke --dry-run
