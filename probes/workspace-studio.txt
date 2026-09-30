@@ -1,0 +1,25 @@
+# Retrieval probes for the `workspace-studio` collection.
+#
+# A fixed query set is the only way a retrieval regression is visible: changes to
+# extraction, chunking or embedding do not show up in a diff. Run these before and
+# after such a change and compare top-1 cosine similarity AND the page each hit
+# lands on — a score that barely moves while the page changes is still a regression.
+#
+# Baseline, 2026-09-30 (RecursiveCharacterTextSplitter, 16 pages, 252 chunks):
+#   0.832  0.678  0.712  0.764  0.619  0.824   mean 0.738
+#
+# Stated honestly: "unchanged from the pre-swap baseline" is what those six
+# demonstrate — not that each is the IDEAL hit. Probes 2 and 5 land on a related
+# page rather than the obvious one (2 -> the calculator quickstart instead of the
+# Event objects page, which is thin at 5 chunks; 5 -> Build a step instead of
+# Pass data between steps). Both are the lowest scorers, at 0.678 and 0.619, so
+# the numbers already flag them. Treat those two as the corpus's known weak
+# spots, and as the first place to look if coverage is extended.
+#
+# Run:  ./bench.sh workspace-studio
+How do I validate an input variable and show an error to the user?
+What fields does the event object passed to a step contain?
+How do I version a step and roll back?
+How do I build a configuration card for a step?
+How do I pass data from one step to the next?
+How do I let a user pick a file from Google Drive?

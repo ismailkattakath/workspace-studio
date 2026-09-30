@@ -46,8 +46,11 @@ nix run .#ingest -- https://example.com/docs/page --collection my-notes
 RAGDB_SOCKET_DIR=/path/to/socketdir RAGDB_PORT=5433 RAGDB_DATABASE=ragdb \
   nix run .#ingest -- --url-file sources/workspace-studio.txt --collection workspace-studio
 
-# tests
+# contract tests
 nix develop --command python3 test_chunk.py
+
+# retrieval benchmark — the only check that sees a quality regression
+./bench.sh workspace-studio
 ```
 
 Query it with the `rag` skill, or directly:
@@ -77,7 +80,7 @@ pipeline never touches them: re-ingest deletes only by exact `metadata->>'source
 |---|---|
 | **trafilatura** for extraction | Purpose-built boilerplate removal, markdown output. **pandoc** (already on PATH) converts the whole document, so a devsite page's nav, breadcrumb and footer land in the corpus as text — on these pages the article body is a small fraction of 172 KB of HTML. A hand-rolled `html.parser` reinvents a genuinely hard wheel. |
 | **Embed in Postgres** via `embed()` | The `rag` skill's contract. One fixed model (`nomic-embed-text`, 768-dim) on both the ingest and query side, so they can never drift apart. Computing vectors in Python would introduce a second path. |
-| **`langchain-text-splitters` for chunking** | The chunker was hand-rolled first — and it was the one layer with a mature off-the-shelf answer sitting in nixpkgs the whole time. `RecursiveCharacterTextSplitter` is the standalone package (no agent framework, no LLM client, no vector-store opinion). **Measured: the swap is free** — mean top-1 similarity 0.737 → 0.738 across 6 queries, same page every time, while deleting ~60 lines that had shipped two bugs. |
+| **`langchain-text-splitters` for chunking** | The chunker was hand-rolled first — and it was the one layer with a mature off-the-shelf answer sitting in nixpkgs the whole time. `RecursiveCharacterTextSplitter` is the standalone package (no agent framework, no LLM client, no vector-store opinion). **Measured: the swap is free** — mean top-1 similarity 0.737 → 0.738 across the 6 probes in `probes/workspace-studio.txt`, each landing on the same page as before, while deleting ~60 lines that had shipped two bugs. Re-run with `./bench.sh workspace-studio`. |
 | **~900 chars, 150 overlap** | Top of the skill's 500–1000 band: keeps a whole procedure step together while leaving the splitter room to find a natural boundary. Measured result: median chunk 821 chars. |
 | **DELETE-then-INSERT per source, one transaction** | Makes re-running idempotent instead of additive. Stale chunks from a changed page are the quiet way a corpus rots. |
 | **`nix run`, no requirements.txt** | Both dependencies are in nixpkgs. Nothing to install, no virtualenv to drift, reproducible across the fleet. |
