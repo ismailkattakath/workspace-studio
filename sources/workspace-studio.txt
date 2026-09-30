@@ -1,0 +1,19 @@
+# Google Workspace Studio — developer documentation
+# Discovered 2026-09-30 from the section nav of /workspace/add-ons/studio.
+# Re-derive: curl -sL <index> | grep -oE 'href="(/workspace/add-ons/studio[^"#?]*)"'
+https://developers.google.com/workspace/add-ons/studio
+https://developers.google.com/workspace/add-ons/studio/activity-logs
+https://developers.google.com/workspace/add-ons/studio/build-a-starter
+https://developers.google.com/workspace/add-ons/studio/build-a-step
+https://developers.google.com/workspace/add-ons/studio/configuration-cards
+https://developers.google.com/workspace/add-ons/studio/custom-resources
+https://developers.google.com/workspace/add-ons/studio/drive-picker
+https://developers.google.com/workspace/add-ons/studio/dynamic-variables
+https://developers.google.com/workspace/add-ons/studio/event-objects
+https://developers.google.com/workspace/add-ons/studio/handle-errors
+https://developers.google.com/workspace/add-ons/studio/input-variables
+https://developers.google.com/workspace/add-ons/studio/output-variables
+https://developers.google.com/workspace/add-ons/studio/quickstart-calculator
+https://developers.google.com/workspace/add-ons/studio/update-cards
+https://developers.google.com/workspace/add-ons/studio/validate-inputs
+https://developers.google.com/workspace/add-ons/studio/versioning
