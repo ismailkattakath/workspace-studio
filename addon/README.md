@@ -114,6 +114,15 @@ about the platform. **A test that agrees with the code about the wrong thing is 
 test.** They now assert the `actionInvocation` payload and carry two regression guards: the old
 `formInputs` shape must be *rejected*, and an integer input must not masquerade as a string.
 
+## What's next
+
+[`RENDERER-DESIGN.md`](RENDERER-DESIGN.md) designs the companion step — JSON Resume to a Google
+Doc and PDF — and is deliberately **not built yet**. It is blocked on this step executing for
+real once, because building a second step on an unverified first one compounds risk rather than
+reducing it. It also records two dead ends verified by running them: the JSON Resume registry's
+`.pdf` endpoint is broken in production, and the registry is username-keyed, so it can never
+render a *tailored* résumé.
+
 ## Deploying it — the honest path
 
 **Platform status:** Workspace Studio custom steps are **generally available** (announced
