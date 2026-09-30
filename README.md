@@ -11,6 +11,14 @@ Collections:
 | `workspace-studio` | 16 pages | 252 | 0.738 |
 | `nix-darwin` | 1 page (the whole option manual) | 511 | 0.667 |
 
+## Also here: a Workspace Studio step
+
+[`addon/`](addon/) holds **Load JSON Resume** — a Google Workspace Studio custom step that
+fetches a `resume.json` in the [jsonresume.org](https://jsonresume.org) standard from a URL the
+user configures and hands it to the rest of their flow. It deliberately does **not** tailor the
+résumé: flows already have a native "ask Gemini" step, so this one stays deterministic, needs no
+API key, and never reads the job posting. See [`addon/README.md`](addon/README.md).
+
 ## Why this exists
 
 Context7 is an index, not a crawler. Its MCP server exposes exactly two tools

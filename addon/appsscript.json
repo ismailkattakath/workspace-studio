@@ -1,0 +1,61 @@
+{
+  "timeZone": "Etc/UTC",
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
+  "oauthScopes": [
+    "https://www.googleapis.com/auth/script.external_request"
+  ],
+  "addOns": {
+    "common": {
+      "name": "JSON Resume",
+      "logoUrl": "https://raw.githubusercontent.com/jsonresume/jsonresume.org/master/apps/registry/public/favicon.ico"
+    },
+    "flows": {
+      "workflowElements": [
+        {
+          "id": "loadJsonResume",
+          "state": "ACTIVE",
+          "name": "Load JSON Resume",
+          "description": "Fetches a resume.json in the jsonresume.org standard from any HTTPS URL - the JSON Resume registry, a GitHub or GitLab raw file, or your own host - and emits it as structured outputs for later steps to use.",
+          "workflowAction": {
+            "inputs": [],
+            "outputs": [
+              {
+                "id": "resume",
+                "description": "The raw resume.json document, as a JSON string.",
+                "cardinality": "SINGLE",
+                "dataType": { "basicType": "STRING" }
+              },
+              {
+                "id": "resumeText",
+                "description": "The resume flattened to plain text, ready to pass to an AI step as context.",
+                "cardinality": "SINGLE",
+                "dataType": { "basicType": "STRING" }
+              },
+              {
+                "id": "name",
+                "description": "basics.name from the resume, for addressing replies.",
+                "cardinality": "SINGLE",
+                "dataType": { "basicType": "STRING" }
+              },
+              {
+                "id": "label",
+                "description": "basics.label - the headline, e.g. \"Principal Software Engineer\".",
+                "cardinality": "SINGLE",
+                "dataType": { "basicType": "STRING" }
+              },
+              {
+                "id": "email",
+                "description": "basics.email from the resume.",
+                "cardinality": "SINGLE",
+                "dataType": { "basicType": "STRING" }
+              }
+            ],
+            "onConfigFunction": "onConfigLoadJsonResume",
+            "onExecuteFunction": "onExecuteLoadJsonResume"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -63,6 +63,14 @@ jobs:
       - name: Chunker contract tests
         run: nix develop --command python3 test_chunk.py
 
+      # The add-on's pure logic. Apps Script itself cannot run here, but the URL
+      # guard, the formInputs shape and the headline formatting are plain JS and
+      # are exactly where its bugs would be. Uses nixpkgs nodejs rather than
+      # actions/setup-node so the version comes from the same pin as everything
+      # else in this repo.
+      - name: Add-on contract tests
+        run: nix run nixpkgs#nodejs -- addon/test-loadjsonresume.mjs
+
       # Extraction is the layer most likely to break without any code change,
       # because it depends on a third party's HTML. A dry run writes nothing and
       # touches no database; it just proves pages still yield an article body.
