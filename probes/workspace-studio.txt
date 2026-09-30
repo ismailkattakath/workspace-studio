@@ -5,7 +5,20 @@
 # after such a change and compare top-1 cosine similarity AND the page each hit
 # lands on — a score that barely moves while the page changes is still a regression.
 #
-# Baseline, 2026-09-30 (RecursiveCharacterTextSplitter, 16 pages, 252 chunks):
+# CURRENT BASELINE, 2026-09-30b — 17 pages, 314 chunks, mean 0.741:
+#   0.832  0.698  0.712  0.764  0.619  0.824
+#
+# WHAT CHANGED: added /workspace/add-ons/concepts/event-objects, the PARENT
+# reference (39,441 chars, 13.1x the thin studio/event-objects page). Probe 2
+# moved 0.672 -> 0.698 and, more importantly, its top hit moved OFF the
+# calculator quickstart ONTO the Event objects page — the score barely moved but
+# the answer became correct, which is exactly why this file says to compare the
+# PAGE as well as the number.
+#
+# Probe 5 is now the only weak one left, unchanged at 0.619: "pass data between
+# steps" still lands on Build a step rather than the output-variables page.
+#
+# ---- previous baseline, 16 pages / 252 chunks ----
 #   0.832  0.678  0.712  0.764  0.619  0.824   mean 0.738
 #
 # Stated honestly: "unchanged from the pre-swap baseline" is what those six

@@ -8,7 +8,7 @@ Collections:
 
 | Collection | Sources | Chunks | Probe mean |
 |---|---|---|---|
-| `workspace-studio` | 16 pages | 252 | 0.738 |
+| `workspace-studio` | 17 pages | 314 | 0.741 |
 | `nix-darwin` | 1 page (the whole option manual) | 511 | 0.667 |
 
 ## Also here: a Workspace Studio step

@@ -17,3 +17,8 @@ https://developers.google.com/workspace/add-ons/studio/quickstart-calculator
 https://developers.google.com/workspace/add-ons/studio/update-cards
 https://developers.google.com/workspace/add-ons/studio/validate-inputs
 https://developers.google.com/workspace/add-ons/studio/versioning
+# Added 2026-09-30: the PARENT event-object reference. Studio's event object is a
+# specialisation of commonEventObject/formInputs, and the studio/ page is thin
+# (3,021 chars). Measured: this one extracts to 39,441 chars — 13.1x — with 25x
+# commonEventObject and 11x formInputs, at zero extraction loss.
+https://developers.google.com/workspace/add-ons/concepts/event-objects
