@@ -1,0 +1,23 @@
+# Retrieval probes for the `nix-darwin` collection.
+# Baseline 2026-09-29, chunk size 900/150 (the rag skill's default), 511 chunks:
+#   0.606  0.729  0.741  0.719  0.597  0.613   mean 0.667
+#
+# CHUNK SIZE WAS TESTED AND THE DEFAULT KEPT. Larger chunks measurably reduce a
+# proxy metric — option names separated from their `Type:`/`Default:` line fall
+# from 21.7% at 900 chars to 15.2% at 1500 and 12.6% at 2000 — but retrieval did
+# NOT move: 1500/250 scored a mean of 0.667, identical to 900/150. The orphan
+# rate does not predict retrieval quality here, so there is no evidence for
+# deviating from the skill's 500-1000 band and the default stands.
+# Tuning the splitter's SEPARATORS was also tried and was actively WORSE:
+# adding the option-entry boundary took orphans from 21.7% to 27.0%, because
+# more split points meant smaller chunks and more mid-option breaks.
+#
+# NOTE ON `bench.sh` FOR THIS COLLECTION: the whole manual is ONE page, so every
+# chunk carries the same title. The "did the top hit change page" check that
+# guards multi-page collections is meaningless here — compare scores only.
+How do I set macOS defaults like the dock autohide and orientation?
+What is the option for declaring a launchd daemon that runs at load?
+How do I declare Homebrew casks and taps declaratively?
+Which option sets the primary user for a nix-darwin system?
+How do I configure a linux builder for cross compilation?
+What option controls the system state version?

@@ -118,16 +118,20 @@ def extract(html: str, url: str) -> Page | None:
 # `keep_separator` preserves the markdown structure trafilatura emitted, so a
 # chunk does not silently lose the newline that separated a heading from its
 # body.
-_SPLITTER = RecursiveCharacterTextSplitter(
-    chunk_size=CHUNK_CHARS,
-    chunk_overlap=CHUNK_OVERLAP,
-    separators=["\n\n", "\n", ". ", " ", ""],
-    keep_separator=True,
-    length_function=len,
-)
+def _make_splitter(size: int = CHUNK_CHARS, overlap: int = CHUNK_OVERLAP) -> RecursiveCharacterTextSplitter:
+    return RecursiveCharacterTextSplitter(
+        chunk_size=size,
+        chunk_overlap=overlap,
+        separators=["\n\n", "\n", ". ", " ", ""],
+        keep_separator=True,
+        length_function=len,
+    )
 
 
-def chunk(text: str) -> list[str]:
+_SPLITTER = _make_splitter()
+
+
+def chunk(text: str, splitter: RecursiveCharacterTextSplitter | None = None) -> list[str]:
     """Split into ~CHUNK_CHARS passages on the most natural boundary available.
 
     OFF THE SHELF ON PURPOSE. This used to be ~60 lines of hand-rolled window
@@ -145,7 +149,7 @@ def chunk(text: str) -> list[str]:
     chunk, so a runt is now COALESCED into whichever neighbour has room, and
     only kept standalone when neither does. Nothing is discarded.
     """
-    pieces = [c.strip() for c in _SPLITTER.split_text(text) if c.strip()]
+    pieces = [c.strip() for c in (splitter or _SPLITTER).split_text(text) if c.strip()]
     out: list[str] = []
     for piece in pieces:
         if len(piece) >= MIN_CHUNK_CHARS:
@@ -205,6 +209,11 @@ def main() -> int:
     ap.add_argument("--db", default=DEFAULT_DB)
     ap.add_argument("--delay", type=float, default=1.0, help="seconds between fetches (be polite)")
     ap.add_argument("--dry-run", action="store_true", help="extract and chunk, write nothing")
+    # Exposed so a source with an unusual shape can be MEASURED at several
+    # settings rather than argued about. The default is the rag skill's
+    # 500-1000 band; override it only with a probe comparison to justify it.
+    ap.add_argument("--chunk-size", type=int, default=CHUNK_CHARS)
+    ap.add_argument("--chunk-overlap", type=int, default=CHUNK_OVERLAP)
     args = ap.parse_args()
 
     urls = list(args.urls)
@@ -215,6 +224,8 @@ def main() -> int:
     urls = list(dict.fromkeys(urls))
     if not urls:
         ap.error("no URLs given")
+
+    splitter = _make_splitter(args.chunk_size, args.chunk_overlap)
 
     conn = None
     if not args.dry_run:
@@ -232,7 +243,7 @@ def main() -> int:
             print("  ! no article body extracted", file=sys.stderr)
             failed += 1
             continue
-        pieces = chunk(page.text)
+        pieces = chunk(page.text, splitter)
         if not pieces:
             print("  ! nothing left after chunking", file=sys.stderr)
             failed += 1

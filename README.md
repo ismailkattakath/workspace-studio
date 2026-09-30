@@ -4,7 +4,12 @@ Ingestion pipeline that puts web documentation into the **local pgvector corpus*
 so it can be retrieved semantically — for material too new to be in a model's training data, and
 too thin or absent in Context7.
 
-Seeded with the **Google Workspace Studio** developer docs (16 pages, 252 chunks).
+Collections:
+
+| Collection | Sources | Chunks | Probe mean |
+|---|---|---|---|
+| `workspace-studio` | 16 pages | 252 | 0.738 |
+| `nix-darwin` | 1 page (the whole option manual) | 511 | 0.667 |
 
 ## Why this exists
 
@@ -51,6 +56,10 @@ nix develop --command python3 test_chunk.py
 
 # retrieval benchmark — the only check that sees a quality regression
 ./bench.sh workspace-studio
+./bench.sh nix-darwin
+
+# parallel ingest (shards a URL list across N workers)
+./ingest-parallel.sh <collection> <url-file> [jobs]
 ```
 
 Query it with the `rag` skill, or directly:
@@ -82,6 +91,8 @@ pipeline never touches them: re-ingest deletes only by exact `metadata->>'source
 | **Embed in Postgres** via `embed()` | The `rag` skill's contract. One fixed model (`nomic-embed-text`, 768-dim) on both the ingest and query side, so they can never drift apart. Computing vectors in Python would introduce a second path. |
 | **`langchain-text-splitters` for chunking** | The chunker was hand-rolled first — and it was the one layer with a mature off-the-shelf answer sitting in nixpkgs the whole time. `RecursiveCharacterTextSplitter` is the standalone package (no agent framework, no LLM client, no vector-store opinion). **Measured: the swap is free** — mean top-1 similarity 0.737 → 0.738 across the 6 probes in `probes/workspace-studio.txt`, each landing on the same page as before, while deleting ~60 lines that had shipped two bugs. Re-run with `./bench.sh workspace-studio`. |
 | **~900 chars, 150 overlap** | Top of the skill's 500–1000 band: keeps a whole procedure step together while leaving the splitter room to find a natural boundary. Measured result: median chunk 821 chars. |
+| **Chunk size stays at the skill's 500–1000 band** | Tested, not assumed. On the nix-darwin option manual, larger chunks measurably improve a proxy — option names separated from their `Type:` line drop from 21.7% at 900 chars to 15.2% at 1500 and 12.6% at 2000 — but retrieval did **not** move: 1500/250 scored a mean of 0.667, identical to 900/150. The proxy does not predict quality, so precedent wins. `--chunk-size`/`--chunk-overlap` exist so the next source can be measured rather than argued about. |
+| **Separator tuning REJECTED** | Adding an option-entry boundary separator made things *worse* — orphans 21.7% → 27.0%, because more split points meant smaller chunks and more mid-option breaks. Recorded so it is not retried. |
 | **DELETE-then-INSERT per source, one transaction** | Makes re-running idempotent instead of additive. Stale chunks from a changed page are the quiet way a corpus rots. |
 | **`nix run`, no requirements.txt** | Both dependencies are in nixpkgs. Nothing to install, no virtualenv to drift, reproducible across the fleet. |
 

@@ -1,0 +1,8 @@
+# nix-darwin option manual — ONE page, ~1.16 MB, 1,153 options.
+# Surveyed 2026-09-29: Context7's best match for the option MANUAL scores 59.52
+# with only 540 snippets against 1,153 real options — the only Nix-ecosystem
+# source that cleared the gap bar. home-manager (62/67), nixpkgs (70/73) and
+# Nix itself (73) were all REJECTED as already well covered.
+# No llms.txt and no sitemap exist anywhere in the Nix ecosystem (4x 404).
+# Do NOT use daiderd.com/nix-darwin/* — it 200s with a 734-byte JS redirect stub.
+https://nix-darwin.github.io/nix-darwin/manual/index.html
