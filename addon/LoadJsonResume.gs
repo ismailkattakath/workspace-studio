@@ -97,12 +97,22 @@ function onExecuteLoadJsonResume(event) {
   // quickstart's own sample does the same thing.
   console.log('LoadJsonResume event: ' + JSON.stringify(event));
 
-  // THE STUDIO PATH, not the generic add-on one. A step execution delivers its
-  // configured values at event.workflow.actionInvocation.inputs — NOT at
-  // event.commonEventObject.formInputs, which at execute time holds only
-  // timeZone / userLocale / hostApp / platform and no formInputs key at all.
-  // Reading the wrong object is silent: the URL comes back empty and the user
-  // sees "no URL is configured" while looking at the URL they typed.
+  // THE STUDIO PATH, not the generic add-on one. CONFIRMED BY A LIVE RUN
+  // (2026-09-30), not inferred — the logged payload was, verbatim:
+  //
+  //   {"clientPlatform":"web",
+  //    "commonEventObject":{"platform":"WEB","hostApp":"WORKFLOW"},
+  //    "workflow":{"triggerEventSource":"TRIGGER_EVENT_SOURCE_AUTOMATED",
+  //      "actionInvocation":{"triggerId":"…",
+  //        "inputs":{"resumeUrl":{"stringValues":["https://…"]}}},
+  //      "executionMetadata":{}},
+  //    "hostApp":"flows"}
+  //
+  // Note commonEventObject: platform and hostApp, and NOTHING else. No
+  // formInputs key to fall back on. An earlier version read
+  // commonEventObject.formInputs[...] and would have resolved undefined against
+  // this exact object — the URL comes back empty and the user sees "no URL is
+  // configured" while looking at the URL they typed.
   var inputs = (event && event.workflow && event.workflow.actionInvocation &&
                 event.workflow.actionInvocation.inputs) || {};
   var url = readActionInput(inputs, 'resumeUrl');

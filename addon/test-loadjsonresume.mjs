@@ -66,6 +66,33 @@ check('accepts an @ in the PATH, not the host',
 // about the wrong thing is worse than no test. They now assert the payload
 // Google's own calculator reads:
 //   event.workflow.actionInvocation.inputs["value1"].integerValues[0]
+// THE REAL PAYLOAD, captured from a live run on 2026-09-30 (Apps Script
+// Executions, onExecuteLoadJsonResume, 0.91 s, Completed). This is no longer a
+// guess reconstructed from documentation — it is what Google actually sent.
+// Only the URL is generalised; every key and nesting level is verbatim.
+//
+// Note what `commonEventObject` contains here: platform and hostApp, and NOTHING
+// ELSE. No formInputs. The original implementation read
+// commonEventObject.formInputs[...] and would have resolved undefined against
+// this exact object.
+//
+// Two fields no documentation mentioned and no survey found: `triggerId` on the
+// actionInvocation, and `hostApp` appearing TWICE with different values —
+// "WORKFLOW" inside commonEventObject, "flows" at the top level.
+const LIVE_EVENT = {
+  clientPlatform: 'web',
+  commonEventObject: { platform: 'WEB', hostApp: 'WORKFLOW' },
+  workflow: {
+    triggerEventSource: 'TRIGGER_EVENT_SOURCE_AUTOMATED',
+    actionInvocation: {
+      triggerId: '00000000-0000-0000-0000-000000000000',
+      inputs: { resumeUrl: { stringValues: ['https://example.com/resume.json'] } },
+    },
+    executionMetadata: {},
+  },
+  hostApp: 'flows',
+};
+
 const invocation = (inputs) => ({ workflow: { actionInvocation: { inputs } } });
 const readFromEvent = (ev, id) => {
   const inputs = (ev && ev.workflow && ev.workflow.actionInvocation && ev.workflow.actionInvocation.inputs) || {};
@@ -81,6 +108,12 @@ check('empty stringValues array yields empty string',
   readFromEvent(invocation({ resumeUrl: { stringValues: [] } }), 'resumeUrl') === '');
 check('a missing workflow envelope does not throw', readFromEvent({}, 'resumeUrl') === '');
 check('an undefined event does not throw', readFromEvent(undefined, 'resumeUrl') === '');
+
+// THE LIVE PAYLOAD ITSELF. If this ever stops parsing, the platform changed.
+check('reads the captured live event',
+  readFromEvent(LIVE_EVENT, 'resumeUrl') === 'https://example.com/resume.json');
+check('live event carries no formInputs to fall back on',
+  LIVE_EVENT.commonEventObject.formInputs === undefined);
 
 // REGRESSION GUARD. The old generic-card payload must NOT satisfy the reader —
 // if it ever does again, the wrong-object bug has come back.

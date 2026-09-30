@@ -1,9 +1,13 @@
 # Design: "Render Resume to Doc" — the companion step
 
-**Status: designed, not built.** Deliberately blocked on `Load JSON Resume` executing for real
-once. That step has never run, and this session proved local tests can be green against a
-completely wrong platform contract — so building a second step on an unverified first one would
-compound the risk rather than reduce it.
+**Status: designed, not built.** The blocker is now CLEARED — `Load JSON Resume` ran on Google's
+servers on 2026-09-30 (`onExecute`, 0.91 s, Completed) and its real event payload is pinned in
+`test-loadjsonresume.mjs`. The platform contract is no longer a guess, so this design can be
+built against something observed instead of inferred.
+
+Two of its four open questions are still open and still only answerable by installing:
+whether `drive.file` alone authorises both the create and the `/export`, and whether Gmail's
+native send step can attach a Drive file or only interpolate a URL.
 
 Everything below was verified on 2026-09-30 by running the request, not by reading about it.
 

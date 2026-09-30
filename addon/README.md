@@ -163,3 +163,56 @@ Chat*, with `name`, `label` and `resumeText` as variable chips in the message.
 **Where to look when it fails:** Apps Script editor → **Executions** first; `onExecute` logs the
 entire event object as its first statement, so the real payload is visible on run one. Then the
 flow's **Activity** tab for the user-facing error.
+
+## Verified running — 2026-09-30
+
+This is no longer a design that should work. It ran, on Google's servers, in a real flow.
+
+| | |
+|---|---|
+| `onConfigLoadJsonResume` | 0.711 s · **Completed** |
+| `onExecuteLoadJsonResume` | 0.91 s · **Completed** |
+| Flow | `Start manually` → `Load JSON Resume` → **Run Completed** |
+
+**The payload that settles it**, logged by `onExecute`'s first statement:
+
+```json
+{
+  "clientPlatform": "web",
+  "commonEventObject": { "platform": "WEB", "hostApp": "WORKFLOW" },
+  "workflow": {
+    "triggerEventSource": "TRIGGER_EVENT_SOURCE_AUTOMATED",
+    "actionInvocation": {
+      "triggerId": "…",
+      "inputs": { "resumeUrl": { "stringValues": ["https://…/resume.json"] } }
+    },
+    "executionMetadata": {}
+  },
+  "hostApp": "flows"
+}
+```
+
+`commonEventObject` holds **`platform` and `hostApp`, nothing else** — there is no `formInputs`
+to fall back on, so the original implementation would have read `undefined` and reported
+"no URL is configured" against a field the user could plainly see filled in.
+
+**Two fields no documentation mentions:** `triggerId` on the `actionInvocation`, and `hostApp`
+appearing **twice with different values** — `"WORKFLOW"` inside `commonEventObject`, `"flows"`
+at the top level.
+
+This exact payload is pinned in `test-loadjsonresume.mjs` as `LIVE_EVENT`. If it stops parsing,
+the platform changed.
+
+### Also learned in the deploy
+
+- **"Allow unpublished (test) custom steps"** is a *second* sub-gate nested under the Admin
+  console's Custom-steps toggle. A Test deployment is unpublished by definition, so without it
+  the step installs and is then refused at run time. It auto-checks when the parent is set to
+  ON — but unchecking it later would break every test step with no obvious cause.
+- **Save before deploying.** Apps Script reads the manifest *server-side* to decide the
+  deployment type. With unsaved changes, `Deploy → Test deployments` offers no **Install** and
+  says only *"update the manifest file with Add-on details"*.
+- **The JSON Resume registry can be wrong about your own résumé.** It returned
+  `RESUME_NOT_VALID_JSON` for a gist that parses cleanly and renders fine through this step. A
+  gist raw URL is the more reliable source, and is exactly the "any HTTPS URL" case this step
+  exists to serve.
