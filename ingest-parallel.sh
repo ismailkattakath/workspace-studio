@@ -37,19 +37,25 @@ collection="${1:?usage: ingest-parallel.sh [--dry-run] <collection> <url-file> [
 urlfile="${2:?usage: ingest-parallel.sh [--dry-run] <collection> <url-file> [jobs]}"
 jobs="${3:-4}"
 
-[ -r "$urlfile" ] || { echo "no such url file: $urlfile" >&2; exit 1; }
+[ -r "$urlfile" ] || {
+  echo "no such url file: $urlfile" >&2
+  exit 1
+}
 
 workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT
 
 # Strip comments and blanks once, here, so the shards are pure URL lists and a
 # worker never has to re-implement the parsing.
-grep -vE '^\s*(#|$)' "$urlfile" > "$workdir/all.txt"
-total=$(wc -l < "$workdir/all.txt" | tr -d ' ')
-[ "$total" -gt 0 ] || { echo "no URLs in $urlfile" >&2; exit 1; }
+grep -vE '^\s*(#|$)' "$urlfile" >"$workdir/all.txt"
+total=$(wc -l <"$workdir/all.txt" | tr -d ' ')
+[ "$total" -gt 0 ] || {
+  echo "no URLs in $urlfile" >&2
+  exit 1
+}
 
 # Ceiling division, so N shards actually cover N*size >= total.
-per=$(( (total + jobs - 1) / jobs ))
+per=$(((total + jobs - 1) / jobs))
 split -l "$per" "$workdir/all.txt" "$workdir/shard."
 shards=$(find "$workdir" -name 'shard.*' | wc -l | tr -d ' ')
 
@@ -66,9 +72,9 @@ echo "==> $total URLs -> $shards shards of <=$per, $jobs parallel, collection=$c
 # parent shell. Double-quoting would interpolate the parent's (empty) $1 and
 # every worker would ingest nothing. The trailing `_` is the child's $0; the
 # args after {} become $2 (collection) and $3 (the dry-run flag, or empty).
-find "$workdir" -name 'shard.*' -print0 \
-  | xargs -0 -P "$jobs" -I{} sh -c \
-      'nix run .#ingest -- --url-file "$1" --collection "$2" --delay 0 $3 2>&1 | sed "s|^|[$(basename "$1")] |"' \
-      _ {} "$collection" "$dry"
+find "$workdir" -name 'shard.*' -print0 |
+  xargs -0 -P "$jobs" -I{} sh -c \
+    'nix run .#ingest -- --url-file "$1" --collection "$2" --delay 0 $3 2>&1 | sed "s|^|[$(basename "$1")] |"' \
+    _ {} "$collection" "$dry"
 
 echo "==> done. Verify with: ./bench.sh $collection"

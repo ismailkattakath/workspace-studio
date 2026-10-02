@@ -78,7 +78,10 @@ def fetch(url: str, *, timeout: int = 30, retries: int = 3) -> str | None:
                 return resp.read().decode("utf-8", errors="replace")
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as exc:
             if attempt == retries:
-                print(f"  ! fetch failed after {retries} tries: {url} ({exc})", file=sys.stderr)
+                print(
+                    f"  ! fetch failed after {retries} tries: {url} ({exc})",
+                    file=sys.stderr,
+                )
                 return None
             time.sleep(2 * attempt)
     return None
@@ -118,7 +121,9 @@ def extract(html: str, url: str) -> Page | None:
 # `keep_separator` preserves the markdown structure trafilatura emitted, so a
 # chunk does not silently lose the newline that separated a heading from its
 # body.
-def _make_splitter(size: int = CHUNK_CHARS, overlap: int = CHUNK_OVERLAP) -> RecursiveCharacterTextSplitter:
+def _make_splitter(
+    size: int = CHUNK_CHARS, overlap: int = CHUNK_OVERLAP
+) -> RecursiveCharacterTextSplitter:
     return RecursiveCharacterTextSplitter(
         chunk_size=size,
         chunk_overlap=overlap,
@@ -131,7 +136,9 @@ def _make_splitter(size: int = CHUNK_CHARS, overlap: int = CHUNK_OVERLAP) -> Rec
 _SPLITTER = _make_splitter()
 
 
-def chunk(text: str, splitter: RecursiveCharacterTextSplitter | None = None) -> list[str]:
+def chunk(
+    text: str, splitter: RecursiveCharacterTextSplitter | None = None
+) -> list[str]:
     """Split into ~CHUNK_CHARS passages on the most natural boundary available.
 
     OFF THE SHELF ON PURPOSE. This used to be ~60 lines of hand-rolled window
@@ -164,13 +171,19 @@ def chunk(text: str, splitter: RecursiveCharacterTextSplitter | None = None) -> 
     # A runt that landed first with a large follower is still standalone here;
     # merge it forward if that fits, so the common "short lead-in" case is
     # covered in both directions.
-    if len(out) > 1 and len(out[0]) < MIN_CHUNK_CHARS and len(out[0]) + len(out[1]) + 1 <= CHUNK_CHARS:
+    if (
+        len(out) > 1
+        and len(out[0]) < MIN_CHUNK_CHARS
+        and len(out[0]) + len(out[1]) + 1 <= CHUNK_CHARS
+    ):
         out[0] = f"{out[0]} {out[1]}"
         del out[1]
     return out
 
 
-def store(conn: psycopg.Connection, page: Page, chunks: list[str], collection: str) -> int:
+def store(
+    conn: psycopg.Connection, page: Page, chunks: list[str], collection: str
+) -> int:
     """Replace this source's rows, then insert the new ones.
 
     DELETE-then-INSERT in ONE transaction is what makes a re-run idempotent
@@ -200,15 +213,25 @@ def main() -> int:
     # far it got — which is exactly how the chunker hang above hid itself.
     sys.stdout.reconfigure(line_buffering=True)
 
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("urls", nargs="*", help="URLs to ingest")
-    ap.add_argument("--url-file", help="file with one URL per line (# comments ignored)")
-    ap.add_argument("--collection", required=True, help="logical corpus name, stored in metadata")
+    ap.add_argument(
+        "--url-file", help="file with one URL per line (# comments ignored)"
+    )
+    ap.add_argument(
+        "--collection", required=True, help="logical corpus name, stored in metadata"
+    )
     ap.add_argument("--socket-dir", default=DEFAULT_SOCKET_DIR)
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
     ap.add_argument("--db", default=DEFAULT_DB)
-    ap.add_argument("--delay", type=float, default=1.0, help="seconds between fetches (be polite)")
-    ap.add_argument("--dry-run", action="store_true", help="extract and chunk, write nothing")
+    ap.add_argument(
+        "--delay", type=float, default=1.0, help="seconds between fetches (be polite)"
+    )
+    ap.add_argument(
+        "--dry-run", action="store_true", help="extract and chunk, write nothing"
+    )
     # Exposed so a source with an unusual shape can be MEASURED at several
     # settings rather than argued about. The default is the rag skill's
     # 500-1000 band; override it only with a probe comparison to justify it.
@@ -260,8 +283,10 @@ def main() -> int:
     if conn is not None:
         conn.close()
 
-    print(f"\npages={pages} failed={failed} chunks={total_chunks} collection={args.collection}"
-          + ("  (DRY RUN — nothing written)" if args.dry_run else ""))
+    print(
+        f"\npages={pages} failed={failed} chunks={total_chunks} collection={args.collection}"
+        + ("  (DRY RUN — nothing written)" if args.dry_run else "")
+    )
     return 1 if pages == 0 else 0
 
 

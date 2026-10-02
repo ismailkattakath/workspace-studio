@@ -39,29 +39,49 @@ def main() -> int:
     #    that single match, and produced a ~86-char chunk with a 1-char stride.
     evil = "x" * 90 + ". " + "y" * 4000
     cs = chunk(evil)
-    check("single early '. ' does not shatter the chunk", len(cs) <= 12, f"got {len(cs)}")
-    check("no chunk exceeds CHUNK_CHARS", all(len(c) <= CHUNK_CHARS for c in cs),
-          f"max={max(map(len, cs))}")
+    check(
+        "single early '. ' does not shatter the chunk", len(cs) <= 12, f"got {len(cs)}"
+    )
+    check(
+        "no chunk exceeds CHUNK_CHARS",
+        all(len(c) <= CHUNK_CHARS for c in cs),
+        f"max={max(map(len, cs))}",
+    )
     # Runts are COALESCED, not dropped, so the contract is "no runt survives
     # that had a neighbour with room" — a lone runt is legal, losing text is not.
-    check("runts are absorbed where possible", sum(1 for c in cs if len(c) < MIN_CHUNK_CHARS) <= 1,
-          f"runts={[len(c) for c in cs if len(c) < MIN_CHUNK_CHARS]}")
+    check(
+        "runts are absorbed where possible",
+        sum(1 for c in cs if len(c) < MIN_CHUNK_CHARS) <= 1,
+        f"runts={[len(c) for c in cs if len(c) < MIN_CHUNK_CHARS]}",
+    )
 
     # 2. A fenced code block has no ". " at all — the backtrack must not fire
     #    and the loop must still terminate.
-    code = "```\n" + "\n".join(f"  const v{i} = compute({i});" for i in range(300)) + "\n```"
+    code = (
+        "```\n"
+        + "\n".join(f"  const v{i} = compute({i});" for i in range(300))
+        + "\n```"
+    )
     cs = chunk(code)
     check("code block terminates", len(cs) > 0)
-    check("code block chunks are full-size", (sum(len(c) for c in cs) / len(cs)) > CHUNK_CHARS * 0.5,
-          f"avg={sum(len(c) for c in cs) / len(cs):.0f}")
+    check(
+        "code block chunks are full-size",
+        (sum(len(c) for c in cs) / len(cs)) > CHUNK_CHARS * 0.5,
+        f"avg={sum(len(c) for c in cs) / len(cs):.0f}",
+    )
 
     # 3. Ordinary prose: many sentences, chunks should land near the target.
-    prose = "\n\n".join(" ".join(f"Sentence number {j} in paragraph {i}." for j in range(40))
-                        for i in range(6))
+    prose = "\n\n".join(
+        " ".join(f"Sentence number {j} in paragraph {i}." for j in range(40))
+        for i in range(6)
+    )
     cs = chunk(prose)
     avg = sum(len(c) for c in cs) / len(cs)
-    check("prose averages near the target", CHUNK_CHARS * 0.4 <= avg <= CHUNK_CHARS,
-          f"avg={avg:.0f}")
+    check(
+        "prose averages near the target",
+        CHUNK_CHARS * 0.4 <= avg <= CHUNK_CHARS,
+        f"avg={avg:.0f}",
+    )
 
     # 4. Coverage: every paragraph's opening words must survive somewhere, i.e.
     #    chunking drops no content.
