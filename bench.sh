@@ -23,5 +23,5 @@ while IFS= read -r q; do
   printf '  %s\n      %s\n' "$row" "$q"
   total=$(awk -v t="$total" -v r="${row%% *}" 'BEGIN{print t+r}')
   n=$((n + 1))
-done < "$probes"
+done <"$probes"
 [ "$n" -gt 0 ] && awk -v t="$total" -v n="$n" 'BEGIN{printf "\n  mean top-1 = %.3f over %d probes\n", t/n, n}'
