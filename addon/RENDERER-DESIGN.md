@@ -150,6 +150,41 @@ Text, HTML, RTF, plain text, Markdown → Google Docs"*. The export endpoint is 
 Errors use `newReturnElementErrorAction().setErrorLog(...)`, matching the pattern
 `LoadJsonResume.gs` already adopted.
 
+## Live run 3 (2026-10-27, on 770ea6f)
+
+| Measured | Result |
+|---|---|
+| Length | **4 pages**, page 4 holding only 2 lines (run 1: 6 pages) |
+| H3 11pt, line-height 1.0, 0.6 in margins, date line 9pt | **confirmed live** |
+| Normal text at paragraph level | **still 11pt**: the `updateNamedStyle` call failed (below) |
+| `pdfUrl` / `docxUrl` export links | **download directly**: PDF 133 KB, DOCX 16 KB |
+
+**Bug: the Normal-text `batchUpdate` returned HTTP 400** *"Invalid requests[0].updateNamedStyle:
+Named style type is required."* The `fields` mask lacked `namedStyleType`. The
+[UpdateNamedStyleRequest reference](https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#UpdateNamedStyleRequest)
+says *"At least `namedStyleType` must be specified."* Fixed: the mask now starts with
+`namedStyleType`, and lists leaf paths only, because naming a parent (`textStyle`) resets its
+nested fields. Tests assert both; dropping either fails them. The page count with Normal at
+10pt is **not yet measured**.
+
+### Trade-off: best-effort styling is invisible to a Studio user
+
+Both styling calls (margins, Normal text) catch their failure, log it with `console.error`, and
+let the step succeed. That is why this 400 showed up **only in Apps Script Executions**, never
+in Studio's Activity tab, the only place a non-developer looks.
+
+| | Best-effort (now) | Fail the step |
+|---|---|---|
+| A styling call fails | Doc delivered, a bit longer or looser | **no Doc output**; the flow stops |
+| Who notices | a developer reading Executions | the user, in Activity |
+| Fits | cosmetic calls on a Doc that already exists | calls the result cannot do without |
+
+**Kept best-effort for now:** the Doc is usable without either call, and hiding a good Doc to
+report a cosmetic miss is the worse failure. **The cost is real:** this bug ran silently for a
+whole live run. Options if it recurs: a STRING output such as `warnings` (a chip a later step
+can show), or `failStep` for styling once the request shapes are proven live. Not changed in
+this commit.
+
 ## Prior art: essentially none
 
 Searched GitHub for `jsonresume google-apps-script`, `json-resume apps-script`,

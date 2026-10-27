@@ -392,7 +392,15 @@ var STYLES = {
  * each paragraph keeping Normal text's 11pt / 1.15 at PARAGRAPH level (only
  * the text runs were 10pt), which likely adds line height per paragraph.
  * Setting Normal text to 10pt, single spacing, no paragraph gaps fixes that
- * at the source. Sent as its own best-effort batchUpdate. Untested live.
+ * at the source. Sent as its own best-effort batchUpdate.
+ *
+ * THE FIELDS MASK MUST START WITH namedStyleType. The Docs API reference for
+ * UpdateNamedStyleRequest: "At least `namedStyleType` must be specified." Live
+ * run 3 (2026-10-27) sent a mask without it and got HTTP 400 "Named style type
+ * is required", which this step logged and swallowed, so Normal stayed 11pt.
+ * The mask lists LEAF paths only: per the same reference, naming a parent
+ * ("textStyle") resets all of its nested fields not given here.
+ * https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/request#UpdateNamedStyleRequest
  */
 function namedStyleRequests() {
   return [{
@@ -406,7 +414,8 @@ function namedStyleRequests() {
           spaceBelow: { magnitude: 0, unit: 'PT' }
         }
       },
-      fields: 'textStyle.fontSize,paragraphStyle.lineSpacing,paragraphStyle.spaceAbove,paragraphStyle.spaceBelow'
+      fields: 'namedStyleType,textStyle.fontSize,paragraphStyle.lineSpacing,' +
+        'paragraphStyle.spaceAbove,paragraphStyle.spaceBelow'
     }
   }];
 }

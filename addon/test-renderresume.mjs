@@ -244,7 +244,16 @@ check('Normal text named style: 10pt, single spacing, no paragraph gaps',
   && ns.namedStyle.textStyle.fontSize.magnitude === 10 && ns.namedStyle.textStyle.fontSize.unit === 'PT'
   && ns.namedStyle.paragraphStyle.lineSpacing === 100
   && ns.namedStyle.paragraphStyle.spaceAbove.magnitude === 0 && ns.namedStyle.paragraphStyle.spaceBelow.magnitude === 0
-  && ns.fields === 'textStyle.fontSize,paragraphStyle.lineSpacing,paragraphStyle.spaceAbove,paragraphStyle.spaceBelow');
+  && ns.fields === 'namedStyleType,textStyle.fontSize,paragraphStyle.lineSpacing,paragraphStyle.spaceAbove,paragraphStyle.spaceBelow');
+// LIVE RUN 3 (2026-10-27): HTTP 400 "Named style type is required". The API
+// requires namedStyleType in the mask AND on the namedStyle object.
+const mask = String(ns?.fields || '').split(',');
+check('updateNamedStyle mask names namedStyleType first', mask[0] === 'namedStyleType', ns?.fields);
+check('updateNamedStyle carries namedStyle.namedStyleType', ns?.namedStyle?.namedStyleType === 'NORMAL_TEXT');
+check('updateNamedStyle mask has only leaf paths (a parent resets its children)',
+  mask.every((p) => p === 'namedStyleType' || /^(textStyle|paragraphStyle)\.\w+$/.test(p)), ns?.fields);
+check('every masked leaf is actually set on the request',
+  mask.filter((p) => p !== 'namedStyleType').every((p) => p.split('.').reduce((o, k) => o?.[k], ns.namedStyle) !== undefined));
 check('allowlist covers the Docs batchUpdate URL', allow.some((p) => (ctx.DOCS_API_URL + 'x:batchUpdate').startsWith(p)));
 
 // #2 HEADLINE WRAP: dates live on their own small line, never inside the h3.
