@@ -88,7 +88,7 @@
         {
           "id": "renderResume",
           "state": "ACTIVE",
-          "name": "Render Resume to Doc",
+          "name": "Render JSON Resume to Doc",
           "description": "Renders a resume.json in the jsonresume.org standard - for example the output of Load JSON Resume, or an AI step's tailored version - into a Google Doc in your Drive, with PDF and DOCX download links. It can only see the files it creates.",
           "workflowAction": {
             "inputs": [

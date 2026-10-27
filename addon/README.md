@@ -5,7 +5,7 @@ Two custom steps in one add-on:
 | Step | Does | File |
 |---|---|---|
 | **Load JSON Resume** | loads your résumé from your JSON Resume account (**Connect JSON Resume**), validates it, and emits it as outputs | `LoadJsonResume.gs` |
-| **Render Resume to Doc** | renders a `resume.json` string into a Google Doc, with PDF and DOCX download links | `RenderResume.gs` |
+| **Render JSON Resume to Doc** | renders a `resume.json` string into a Google Doc, with PDF and DOCX download links | `RenderResume.gs` |
 
 ## Load JSON Resume
 
@@ -40,7 +40,7 @@ step, so the tailoring belongs there. That split is the whole design:
         ↓
 [ask Gemini: tailor this résumé to this posting]
         ↓
-[Render Resume to Doc]  ← optional: the tailored résumé as a Google Doc
+[Render JSON Resume to Doc]  ← optional: the tailored résumé as a Google Doc
         ↓
 [Gmail: create draft]   ← put docUrl / pdfUrl / docxUrl in the body
 ```
@@ -97,7 +97,7 @@ Click **Connect JSON Resume** again.
 `awards`, each entry as a headline plus summary plus highlights. Measured on a real registry
 résumé: 10,605 characters over 123 lines.
 
-## Render Resume to Doc
+## Render JSON Resume to Doc
 
 Takes a résumé as JSON text, usually Load JSON Resume's `resume` output or an AI step's tailored
 rewrite of it. It renders the résumé to a single-column HTML document. Google converts that into
@@ -145,7 +145,7 @@ left out on purpose: an external image URL is a tracking beacon.
 | Scope | Needed by | Grants |
 |---|---|---|
 | `script.external_request` | both steps | outbound HTTPS (jsonresume.org sign-in and fetch; Drive/Docs REST) |
-| `drive.file` | Render Resume to Doc | **only the files this add-on creates** |
+| `drive.file` | Render JSON Resume to Doc | **only the files this add-on creates** |
 
 Neither step reads your mail or calendar. The renderer cannot see any Drive file it did not
 create itself.
@@ -237,7 +237,7 @@ test.** They now assert the `actionInvocation` payload and carry two regression 
 
 ## The renderer: built, and run live
 
-[`RENDERER-DESIGN.md`](RENDERER-DESIGN.md) is the design for **Render Resume to Doc**, which is
+[`RENDERER-DESIGN.md`](RENDERER-DESIGN.md) is the design for **Render JSON Resume to Doc**, which is
 now **built** (`RenderResume.gs`). It waited until Load JSON Resume had run for real, and that
 happened on 2026-09-30. The design also records two dead ends, verified by running them: the
 JSON Resume registry's `.pdf` endpoint is broken in production, and the registry is

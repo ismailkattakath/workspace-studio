@@ -235,13 +235,13 @@ const full = {
 const f = ctx.resumeToHtml(full);
 const h2 = (html, heading) => new RegExp(`<h2 style="[^"]*">${heading}</h2>`).test(html);
 check('name is the h1', /<h1 style="[^"]*">Ada Lovelace<\/h1>/.test(f));
-check('email becomes a mailto link', f.includes('<a href="mailto:ada@example.com">ada@example.com</a>'));
-check('safe URLs become links', f.includes('<a href="https://github.com/ada">GitHub: ada</a>'));
+check('email becomes an ink-coloured mailto link', f.includes('<a href="mailto:ada@example.com" style="color:#111827;text-decoration:underline">ada@example.com</a>'));
+check('safe URLs become ink-coloured links, labelled by network', /<a href="https:\/\/github.com\/ada" style="color:#111827;text-decoration:underline">GitHub<\/a>/.test(f));
+check('no link is left to Docs\' default blue', [...f.matchAll(/<a [^>]*>/g)].every((m) => /color:#111827/.test(m[0])));
 check('open-ended role reads as Present, with a month name', f.includes('Jan 1842 – Present'));
-for (const heading of ['Summary', 'Experience', 'Projects', 'Education', 'Skills']) {
+for (const heading of ['EDUCATION', 'PROFESSIONAL EXPERIENCE', 'PROJECTS', 'SKILLS']) {
   check(`renders the ${heading} section`, h2(f, heading));
 }
-check('experience comes before education', f.indexOf('>Experience</h2>') < f.indexOf('>Education</h2>'));
 for (const heading of ['Awards', 'Certifications', 'Publications', 'Volunteering', 'Languages', 'Interests', 'References']) {
   check(`absent section ${heading} has no heading`, !h2(f, heading));
 }
@@ -290,9 +290,15 @@ check('allowlist covers the Docs batchUpdate URL', allow.some((p) => (ctx.DOCS_A
 
 // #2 HEADLINE WRAP: dates live on their own small line, never inside the h3.
 const h3s = [...f.matchAll(/<h3[^>]*>([\s\S]*?)<\/h3>/g)].map((m) => m[1]);
-check('no h3 contains a date', h3s.length > 0 && h3s.every((t) => !/\d{4}/.test(t)), JSON.stringify(h3s));
-check('dates sit on the grey meta line right under the h3',
-  /<\/h3><p style="[^"]*color:#555555[^"]*">Jan 1842 – Present<\/p>/.test(f));
+check('no h3 contains a date', h3s.length > 0 && h3s.every((t) => !/\d{4}/.test(t.replace(/<[^>]*>/g, ''))), JSON.stringify(h3s));
+check('entries read title / italic organisation / grey dates (academic-cv-lite)',
+  /<\/h3><p style="[^"]*font-style:italic[^"]*">[^<]*(<a [^>]*>[^<]*<\/a>)?[^<]*<\/p><p style="[^"]*color:#666666[^"]*">Jan 1842 – Present<\/p>/.test(f));
+check('the summary sits unheaded under the header, then a rule',
+  !h2(f, 'SUMMARY') && /<hr>/.test(f));
+check('Education comes before Professional Experience',
+  f.indexOf('>EDUCATION<') > 0 && f.indexOf('>EDUCATION<') < f.indexOf('>PROFESSIONAL EXPERIENCE<'));
+check('headings and body use Merriweather', /font-family:Merriweather,Georgia,serif/.test(f));
+check('section headings are uppercase over a rule', /<h2 style="[^"]*text-transform:uppercase;border-bottom:2px solid/.test(f));
 
 // #3 DATES: ISO to "Mon YYYY", unparseable strings untouched.
 for (const [inp, want] of [['2024', '2024'], ['2024-08', 'Aug 2024'], ['2024-08-01', 'Aug 2024'],
@@ -307,7 +313,7 @@ check('single dates are formatted (certificates)',
   ctx.resumeToHtml({ certificates: [{ name: 'CKA', date: '2023-05-02' }] }).includes('May 2023'));
 
 // #4 EDUCATION: studyType and area joined with a comma.
-check('education joins studyType and area with ", "', f.includes('Tutoring, Mathematics'));
+check('education reads "studyType in area"', f.includes('Tutoring in Mathematics'));
 
 // Compact skills: one paragraph per group, no h3.
 check('skills render as one compact paragraph, not an h3',

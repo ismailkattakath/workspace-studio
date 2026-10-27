@@ -1,5 +1,5 @@
 /**
- * "Render Resume to Doc" — the companion step to Load JSON Resume.
+ * "Render JSON Resume to Doc" — the companion step to Load JSON Resume.
  *
  * Takes a resume.json STRING (typically Load JSON Resume's `resume` output, or
  * an AI step's tailored rewrite of it), renders it to HTML, and has Google
@@ -80,7 +80,7 @@ function onConfigRenderResume() {
     .addWidget(titleInput);
 
   return CardService.newCardBuilder()
-    .setHeader(CardService.newCardHeader().setTitle('Render Resume to Doc'))
+    .setHeader(CardService.newCardHeader().setTitle('Render JSON Resume to Doc'))
     .addSection(section)
     .build();
 }
@@ -372,10 +372,15 @@ function safeEmail(v) {
 }
 
 /** A link when the URL is safe, plain escaped text when it is not. */
-function linkOrText(url, text) {
+// Ink-coloured links, as in academic-cv-lite: Docs paints an unstyled link
+// blue (live, 2026-10-27). Entry links stay plain; the contact line underlines.
+var LINK_STYLE = 'color:#111827;text-decoration:none';
+var CONTACT_LINK_STYLE = 'color:#111827;text-decoration:underline';
+
+function linkOrText(url, text, style) {
   var safe = safeWebUrl(url);
   var label = escapeHtml(text || url);
-  return safe ? '<a href="' + escapeHtml(safe) + '">' + label + '</a>' : label;
+  return safe ? '<a href="' + escapeHtml(safe) + '" style="' + (style || LINK_STYLE) + '">' + label + '</a>' : label;
 }
 
 function arr(v) {
@@ -438,13 +443,26 @@ function joinNonEmpty(parts, sep) {
  * Spacing (second live run: 4 pages, last one half full; target 2-3): line
  * height 1.0 instead of 1.15, and tighter block margins. Untested live.
  */
-var FONT = 'font-family:Arial,sans-serif;line-height:1.0;';
+// The look follows jsonresume.org's academic-cv-lite theme (measured on the
+// live page, 2026-10-27): Merriweather, ink #111827 / body #1f2937 / dates
+// #666666; centred name, italic centred headline, centred contact line with
+// bullets; UPPERCASE section headings over a 2px rule; entries as bold title,
+// italic organisation, grey dates. Sizes stay compact (the theme's ratios,
+// scaled to a 10pt body, single spacing) so a full résumé still fits in
+// about 3 pages; Merriweather sets taller than Arial.
+// Docs has no letter-spacing, so the theme's 1px tracking is left out.
+var INK = '#111827';
+var FONT = 'font-family:Merriweather,Georgia,serif;line-height:1.0;color:#1f2937;';
 var STYLES = {
-  h1: FONT + 'font-size:18pt;font-weight:bold;margin:0 0 2pt 0',
-  label: FONT + 'font-size:11pt;font-weight:bold;margin:0 0 2pt 0',
-  h2: FONT + 'font-size:12pt;font-weight:bold;margin:8pt 0 2pt 0',
-  h3: FONT + 'font-size:11pt;font-weight:bold;margin:4pt 0 0 0',
-  meta: FONT + 'font-size:9pt;color:#555555;margin:0 0 1pt 0',
+  h1: FONT + 'font-size:20pt;font-weight:bold;color:' + INK + ';text-align:center;margin:0 0 2pt 0',
+  label: FONT + 'font-size:12pt;font-style:italic;text-align:center;margin:0 0 4pt 0',
+  contact: FONT + 'font-size:10pt;text-align:center;margin:0 0 6pt 0',
+  summary: FONT + 'font-size:10pt;margin:0 0 4pt 0',
+  h2: FONT + 'font-size:13pt;font-weight:bold;color:' + INK + ';text-transform:uppercase;' +
+    'border-bottom:2px solid ' + INK + ';padding-bottom:2pt;margin:12pt 0 4pt 0',
+  h3: FONT + 'font-size:11pt;font-weight:bold;color:' + INK + ';margin:6pt 0 0 0',
+  org: FONT + 'font-size:10pt;font-style:italic;margin:0',
+  meta: FONT + 'font-size:9pt;color:#666666;margin:0 0 2pt 0',
   p: FONT + 'font-size:10pt;margin:0 0 2pt 0',
   ul: 'margin:0 0 2pt 0',
   li: FONT + 'font-size:10pt;margin:0'
@@ -512,6 +530,7 @@ function marginRequests(pt) {
  */
 function renderEntry(e) {
   var html = el('h3', 'h3', e.title);
+  if (e.org) html += el('p', 'org', e.org);
   var meta = [e.dates ? escapeHtml(e.dates) : '', e.subtitle || ''].filter(function (x) { return x; });
   if (meta.length) html += el('p', 'meta', meta.join(' · '));
   if (str(e.summary).trim()) html += el('p', 'p', escapeHtml(e.summary));
@@ -541,9 +560,20 @@ function renderCompactEntry(e) {
  * HTML, which is why every value they use goes through escapeHtml/linkOrText.
  */
 var RESUME_SECTIONS = [
-  { key: 'work', heading: 'Experience', entry: function (w) {
+  // academic-cv-lite's order: education first.
+  { key: 'education', heading: 'Education', entry: function (ed) {
     return {
-      title: joinNonEmpty([escapeHtml(w.position), linkOrText(w.url, w.name || w.company)], ' — '),
+      title: linkOrText(ed.url, ed.institution),
+      org: escapeHtml(joinNonEmpty([ed.studyType, ed.area], ' in ')),
+      dates: dateRange(ed.startDate, ed.endDate),
+      subtitle: escapeHtml(ed.score ? 'Score: ' + str(ed.score) : ''),
+      summary: '', bullets: ed.courses
+    };
+  } },
+  { key: 'work', heading: 'Professional Experience', entry: function (w) {
+    return {
+      title: escapeHtml(w.position) || linkOrText(w.url, w.name || w.company),
+      org: w.position ? linkOrText(w.url, w.name || w.company) : '',
       dates: dateRange(w.startDate, w.endDate),
       subtitle: escapeHtml(joinNonEmpty([w.location, w.description], ' · ')),
       summary: w.summary, bullets: w.highlights
@@ -553,39 +583,28 @@ var RESUME_SECTIONS = [
     // p.type is a free-form category ("application", "volunteering"). Printed
     // raw it read as an enum, so it is left out.
     return {
-      title: joinNonEmpty([linkOrText(p.url, p.name), escapeHtml(p.entity)], ' — '),
+      title: linkOrText(p.url, p.name),
+      org: escapeHtml(joinNonEmpty([p.entity, arr(p.roles).map(str).join(', ')], ' · ')),
       dates: dateRange(p.startDate, p.endDate),
-      subtitle: escapeHtml(arr(p.roles).map(str).join(', ')),
       summary: p.description || p.summary, bullets: p.highlights, keywords: p.keywords
-    };
-  } },
-  { key: 'education', heading: 'Education', entry: function (ed) {
-    return {
-      title: joinNonEmpty([escapeHtml(joinNonEmpty([ed.studyType, ed.area], ', ')),
-        linkOrText(ed.url, ed.institution)], ' — '),
-      dates: dateRange(ed.startDate, ed.endDate),
-      subtitle: escapeHtml(ed.score ? 'Score: ' + str(ed.score) : ''),
-      summary: '', bullets: ed.courses
     };
   } },
   { key: 'skills', heading: 'Skills', compact: true, entry: function (s) {
     return { title: escapeHtml(joinNonEmpty([s.name, s.level], ' — ')), keywords: s.keywords };
   } },
   { key: 'certificates', heading: 'Certifications', entry: function (c) {
-    return { title: joinNonEmpty([linkOrText(c.url, c.name), escapeHtml(c.issuer)], ' — '), dates: formatDate(c.date) };
+    return { title: linkOrText(c.url, c.name), org: escapeHtml(c.issuer), dates: formatDate(c.date) };
   } },
   { key: 'awards', heading: 'Awards', entry: function (a) {
-    return { title: escapeHtml(joinNonEmpty([a.title, a.awarder], ' — ')), dates: formatDate(a.date), summary: a.summary };
+    return { title: escapeHtml(a.title), org: escapeHtml(a.awarder), dates: formatDate(a.date), summary: a.summary };
   } },
   { key: 'publications', heading: 'Publications', entry: function (p) {
-    return {
-      title: joinNonEmpty([linkOrText(p.url, p.name), escapeHtml(p.publisher)], ' — '),
-      dates: formatDate(p.releaseDate), summary: p.summary
-    };
+    return { title: linkOrText(p.url, p.name), org: escapeHtml(p.publisher), dates: formatDate(p.releaseDate), summary: p.summary };
   } },
   { key: 'volunteer', heading: 'Volunteering', entry: function (v) {
     return {
-      title: joinNonEmpty([escapeHtml(v.position), linkOrText(v.url, v.organization)], ' — '),
+      title: escapeHtml(v.position) || linkOrText(v.url, v.organization),
+      org: v.position ? linkOrText(v.url, v.organization) : '',
       dates: dateRange(v.startDate, v.endDate), summary: v.summary, bullets: v.highlights
     };
   } },
@@ -619,23 +638,24 @@ function resumeToHtml(resume) {
 
   var loc = (b.location && typeof b.location === 'object') ? b.location : {};
   var email = safeEmail(b.email);
+  // The theme's contact line: email, phone, location, site, then each profile
+  // by network name; links show without the scheme.
   var contact = [
-    email ? '<a href="mailto:' + escapeHtml(email) + '">' + escapeHtml(email) + '</a>' : escapeHtml(b.email),
+    email ? '<a href="mailto:' + escapeHtml(email) + '" style="' + CONTACT_LINK_STYLE + '">' + escapeHtml(email) + '</a>' : escapeHtml(b.email),
     escapeHtml(b.phone),
-    str(b.url).trim() ? linkOrText(b.url, b.url) : '',
-    escapeHtml(joinNonEmpty([loc.city, loc.region, loc.countryCode], ', '))
+    escapeHtml(joinNonEmpty([loc.city, loc.region, loc.countryCode], ', ')),
+    str(b.url).trim() ? linkOrText(b.url, str(b.url).replace(/^https?:\/\//, '').replace(/\/$/, ''), CONTACT_LINK_STYLE) : ''
   ];
   objs(b.profiles).forEach(function (p) {
-    var label = joinNonEmpty([p.network, p.username], ': ');
-    contact.push(str(p.url).trim() ? linkOrText(p.url, label || p.url) : escapeHtml(label));
+    var label = str(p.network).trim() || str(p.username).trim();
+    contact.push(str(p.url).trim() ? linkOrText(p.url, label || p.url, CONTACT_LINK_STYLE) : escapeHtml(label));
   });
   contact = contact.filter(function (c) { return c; });
-  if (contact.length) out.push(el('p', 'meta', contact.join(' · ')));
+  if (contact.length) out.push(el('p', 'contact', contact.join('  •  ')));
 
-  if (str(b.summary).trim()) {
-    out.push(el('h2', 'h2', 'Summary'));
-    out.push(el('p', 'p', escapeHtml(b.summary)));
-  }
+  // The theme puts the summary straight under the header, unheaded, then a rule.
+  if (str(b.summary).trim()) out.push(el('p', 'summary', escapeHtml(b.summary)));
+  out.push('<hr>');
 
   RESUME_SECTIONS.forEach(function (section) {
     var items = objs(r[section.key]);
@@ -646,7 +666,7 @@ function resumeToHtml(resume) {
       return section.compact ? renderCompactEntry(e) : renderEntry(e);
     }).join('');
     if (!body) return;
-    out.push(el('h2', 'h2', section.heading));
+    out.push(el('h2', 'h2', escapeHtml(section.heading.toUpperCase())));
     out.push(body);
   });
 
