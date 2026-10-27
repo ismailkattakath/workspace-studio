@@ -153,21 +153,12 @@
           "id": "parseJobDescription",
           "state": "ACTIVE",
           "name": "Parse Job Description",
-          "description": "Checks a job posting that an AI step wrote as JSON against the jsonresume.org job schema, fails if it does not match, and reads who to reply to from the forwarded email's header.",
+          "description": "Checks a job posting that an AI step wrote as JSON against the jsonresume.org job schema, fails if it does not match, and emits the job, its title and its company.",
           "workflowAction": {
             "inputs": [
               {
                 "id": "jobJson",
                 "description": "Job posting (JSON)",
-                "cardinality": "SINGLE",
-                "required": true,
-                "dataType": {
-                  "basicType": "STRING"
-                }
-              },
-              {
-                "id": "forwardedEmail",
-                "description": "Forwarded email (body)",
                 "cardinality": "SINGLE",
                 "required": true,
                 "dataType": {
@@ -195,22 +186,6 @@
               {
                 "id": "company",
                 "description": "Company",
-                "cardinality": "SINGLE",
-                "dataType": {
-                  "basicType": "STRING"
-                }
-              },
-              {
-                "id": "replyTo",
-                "description": "Original sender",
-                "cardinality": "SINGLE",
-                "dataType": {
-                  "basicType": "EMAIL_ADDRESS"
-                }
-              },
-              {
-                "id": "replySubject",
-                "description": "Reply subject",
                 "cardinality": "SINGLE",
                 "dataType": {
                   "basicType": "STRING"
