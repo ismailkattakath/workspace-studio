@@ -18,6 +18,7 @@
 
 var JOB_STRING_FIELDS = ['title', 'company', 'type', 'date', 'description', 'remote', 'salary', 'experience'];
 var JOB_STRING_LIST_FIELDS = ['responsibilities', 'qualifications'];
+var FORMULA_START = /^[=+\-@\t\r]/;
 
 function onConfigParseJobDescription() {
   var job = CardService.newTextInput()
@@ -109,6 +110,16 @@ function jobShapeProblems(job) {
   if ('date' in job && typeof job.date === 'string' && job.date && !ISO8601_PARTIAL.test(job.date)) {
     problems.push('date must be YYYY, YYYY-MM or YYYY-MM-DD');
   }
+  // These fields become tracker Sheet cells. A posting could steer Gemini into
+  // "=IMPORTXML(...)" and leak other cells if the Sheet evaluates it, so a value
+  // that would start a formula fails the step (no repair, the rule above).
+  var cells = ['title', 'company', 'type', 'remote', 'salary'].map(function (f) { return [f, job[f]]; });
+  if (isPlainObject(job.location)) {
+    Object.keys(job.location).forEach(function (k) { cells.push(['location.' + k, job.location[k]]); });
+  }
+  cells.forEach(function (c) {
+    if (typeof c[1] === 'string' && FORMULA_START.test(c[1].trim())) problems.push(c[0] + ' must not start with = + - @');
+  });
   var substance = ['responsibilities', 'qualifications', 'skills'].some(function (f) {
     return Array.isArray(job[f]) && job[f].length > 0;
   });
