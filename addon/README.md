@@ -1,4 +1,13 @@
-# Load JSON Resume — a Google Workspace Studio step
+# JSON Resume steps for Google Workspace Studio
+
+Two custom steps in one add-on:
+
+| Step | Does | File |
+|---|---|---|
+| **Load JSON Resume** | fetches a `resume.json` from a URL and emits it as outputs | `LoadJsonResume.gs` |
+| **Render Resume to Doc** | renders a `resume.json` string into a Google Doc, plus a PDF copy | `RenderResume.gs` |
+
+## Load JSON Resume
 
 Fetches a `resume.json` in the [jsonresume.org](https://jsonresume.org) standard from a URL you
 configure, and hands it to the rest of your flow. Point it at your résumé and it works — the
@@ -25,7 +34,9 @@ step, so the tailoring belongs there. That split is the whole design:
         ↓
 [ask Gemini: tailor this résumé to this posting]
         ↓
-[Gmail: create draft]
+[Render Resume to Doc]  ← optional: the tailored résumé as a Doc + PDF
+        ↓
+[Gmail: create draft]   ← put docUrl / pdfUrl in the body
 ```
 
 ## Configuration
@@ -52,20 +63,89 @@ One field, on the step's configuration card:
 `awards`, each entry as a headline plus summary plus highlights. Measured on a real registry
 résumé: 10,605 characters over 123 lines.
 
+## Render Resume to Doc
+
+Takes a résumé as JSON text, usually Load JSON Resume's `resume` output or an AI step's tailored
+rewrite of it. It renders the résumé to a single-column HTML document. Google converts that into
+a **Google Doc** in your Drive, then the step exports the Doc to a **PDF** saved beside it.
+
+| Input | Required | Notes |
+|---|---|---|
+| `resume` | yes | JSON text in the jsonresume.org standard. A ```` ```json ```` fence from an AI step is stripped |
+| `title` | no | defaults to `<basics.name> — Résumé` |
+
+| Output | Type | Use |
+|---|---|---|
+| `docId` | STRING | Drive file ID of the Doc |
+| `docUrl` | STRING | link to the Doc, for a Gmail or Chat step |
+| `pdfFileId` | STRING | Drive file ID of the PDF. **Empty if the export failed** |
+| `pdfUrl` | STRING | link to the PDF. **Empty if the export failed** |
+
+A Studio step cannot output a file: output types are scalars only. So the step returns file IDs
+and links, which is the same pattern Google's own Drive picker uses.
+
+**Failure policy:**
+
+- No résumé, bad JSON, or a failed Doc create → the step **fails**, with the reason in Activity.
+- A failed PDF export → the step **succeeds** with the Doc, and the two `pdf*` outputs are
+  empty. The reason goes to the Executions log. The Doc already exists, and failing the run
+  would hide it from later steps.
+
+**Sections rendered**, in order, each skipped when absent or empty: basics (name, label,
+contact, profiles, summary), work, projects, education, skills, certificates, awards,
+publications, volunteer, languages, interests, references.
+
+**The résumé is untrusted input.** It may come from an AI step that read a job posting from an
+inbox. So every value is HTML-escaped. A link becomes an `href` only for `http(s)://` URLs
+without credentials, so `javascript:` and `data:` URLs render as plain text. `basics.image` is
+left out on purpose: an external image URL is a tracking beacon.
+
+## Scopes
+
+| Scope | Needed by | Grants |
+|---|---|---|
+| `script.external_request` | both steps | outbound HTTPS |
+| `drive.file` | Render Resume to Doc | **only the files this add-on creates** |
+
+Neither step reads your mail or calendar. The renderer cannot see any Drive file it did not
+create itself.
+
+**Measured 2026-10-27, with only those two scopes:**
+
+| Call | Result |
+|---|---|
+| Drive REST `files.create`, HTML → Google Doc (multipart upload) | **works** |
+| Docs API `documents.batchUpdate` on that Doc | **works** (the step does not use it) |
+| Drive REST `files/{id}/export?mimeType=application/pdf` | **works** |
+| Drive REST `files.create` of the PDF bytes | **works** |
+| `DocumentApp.create` / `openById` | **fails**: needs `auth/documents` |
+| `DriveApp.getFileById` | **fails**: needs `drive.readonly` or `drive` |
+
+So `RenderResume.gs` uses **no `DocumentApp` and no `DriveApp`**. It calls REST through
+`UrlFetchApp` with `ScriptApp.getOAuthToken()`. The tests assert that.
+
 ## Install
 
 1. Create an Apps Script project, set it to the **V8** runtime.
-2. Copy `LoadJsonResume.gs` and `appsscript.json` into it.
-3. Deploy as a Workspace add-on and add it to a flow.
+2. Copy `LoadJsonResume.gs`, `RenderResume.gs` and `appsscript.json` into it.
+3. Deploy as a Workspace add-on and add the steps to a flow.
 
-The only OAuth scope requested is `script.external_request` — needed to fetch your résumé URL,
-and nothing else. The step reads no mail, no Drive, no calendar.
+`RenderResume.gs` reuses `str()`, `readActionInput()`, `failStep()`, `hasAnyKnownSection()` and
+`MAX_BYTES` from `LoadJsonResume.gs`. Apps Script loads every `.gs` file into **one global
+scope**, so both files must be in the project, and neither may redefine the other's functions.
 
 ## Tests
 
 ```bash
 nix run nixpkgs#nodejs -- addon/test-loadjsonresume.mjs
+nix run nixpkgs#nodejs -- addon/test-renderresume.mjs
 ```
+
+`test-renderresume.mjs` loads both `.gs` files into one context, the way Apps Script does. It
+checks HTML escaping against a hostile résumé, the `href` guard, section order and absence, and
+the manifest contract: declared outputs, callbacks, card-field bindings, the two-scope bill and
+the URL allowlist. All of it runs inside `nix flake check`; only the live-registry renders skip
+offline.
 
 Apps Script cannot run off Google's servers, so the Workspace Studio integration itself has to
 be verified by installing the add-on. Everything that does **not** touch `CardService` or
@@ -114,14 +194,16 @@ about the platform. **A test that agrees with the code about the wrong thing is 
 test.** They now assert the `actionInvocation` payload and carry two regression guards: the old
 `formInputs` shape must be *rejected*, and an integer input must not masquerade as a string.
 
-## What's next
+## The renderer: built, not yet run live
 
-[`RENDERER-DESIGN.md`](RENDERER-DESIGN.md) designs the companion step — JSON Resume to a Google
-Doc and PDF — and is deliberately **not built yet**. It is blocked on this step executing for
-real once, because building a second step on an unverified first one compounds risk rather than
-reducing it. It also records two dead ends verified by running them: the JSON Resume registry's
-`.pdf` endpoint is broken in production, and the registry is username-keyed, so it can never
-render a *tailored* résumé.
+[`RENDERER-DESIGN.md`](RENDERER-DESIGN.md) is the design for **Render Resume to Doc**, which is
+now **built** (`RenderResume.gs`). It waited until Load JSON Resume had run for real, and that
+happened on 2026-09-30. The design also records two dead ends, verified by running them: the
+JSON Resume registry's `.pdf` endpoint is broken in production, and the registry is
+username-keyed, so it can never render a *tailored* résumé.
+
+**Not yet done:** a live run of the renderer in a flow. The scope calls it relies on were
+measured on 2026-10-27 (§ Scopes), but the step itself has not run on Google's servers.
 
 ## Deploying it — the honest path
 
@@ -140,7 +222,20 @@ Education — a personal `@gmail.com` needs Workspace Experiments), flows allowe
 enabled.
 
 **No Google Cloud project is needed** for a step. That requirement applies to *starters*, which
-post to the Workspace Studio API. This add-on requests one scope, `script.external_request`.
+post to the Workspace Studio API. This add-on requests two scopes (§ Scopes).
+
+**The Drive and Docs advanced services must stay declared** in `appsscript.json`
+(`dependencies.enabledAdvancedServices`). Without them, REST calls return **403** *"Google Drive
+API has not been used in project …"*, because the hidden default Cloud project has the API off.
+Declaring the service turns it on and **adds no scope**. The code never calls the `Drive` or
+`Docs` globals; the declaration exists only to enable the APIs.
+
+**URL allowlist (`urlFetchWhitelist`):** optional for a **test** deployment, **required** for a
+**versioned** one. Entries must be `https://` with a full domain and a path, with at most one
+leading `*` for subdomains. **There is no "any host" entry.** So in a versioned deployment, Load
+JSON Resume can only fetch from the listed hosts: `registry.jsonresume.org`,
+`raw.githubusercontent.com`, `gist.githubusercontent.com` and `gitlab.com`. Add a host to the
+manifest to serve a résumé from anywhere else. A test deployment keeps "any HTTPS URL".
 
 **Use the web editor for the first run, not `clasp`.** `clasp` is in nixpkgs as
 `nixpkgs#google-clasp` (note: `nixpkgs#clasp` is a different program entirely), but it
@@ -150,7 +245,7 @@ first light, when `clasp push` beats re-pasting.
 
 1. Create an Apps Script project, runtime **V8**.
 2. Project Settings → tick *Show `appsscript.json` manifest file in editor*.
-3. Paste `appsscript.json` and `LoadJsonResume.gs`.
+3. Paste `appsscript.json`, `LoadJsonResume.gs` and `RenderResume.gs`.
 4. **Deploy → Test deployments → Install → Done.**
 5. Refresh Workspace Studio and authorise the add-on.
 

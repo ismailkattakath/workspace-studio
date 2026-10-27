@@ -3,7 +3,30 @@
   "exceptionLogging": "STACKDRIVER",
   "runtimeVersion": "V8",
   "oauthScopes": [
-    "https://www.googleapis.com/auth/script.external_request"
+    "https://www.googleapis.com/auth/script.external_request",
+    "https://www.googleapis.com/auth/drive.file"
+  ],
+  "dependencies": {
+    "enabledAdvancedServices": [
+      {
+        "serviceId": "drive",
+        "userSymbol": "Drive",
+        "version": "v3"
+      },
+      {
+        "serviceId": "docs",
+        "userSymbol": "Docs",
+        "version": "v1"
+      }
+    ]
+  },
+  "urlFetchWhitelist": [
+    "https://www.googleapis.com/",
+    "https://docs.googleapis.com/",
+    "https://registry.jsonresume.org/",
+    "https://raw.githubusercontent.com/",
+    "https://gist.githubusercontent.com/",
+    "https://gitlab.com/"
   ],
   "addOns": {
     "common": {
@@ -73,6 +96,70 @@
             ],
             "onConfigFunction": "onConfigLoadJsonResume",
             "onExecuteFunction": "onExecuteLoadJsonResume"
+          }
+        },
+        {
+          "id": "renderResume",
+          "state": "ACTIVE",
+          "name": "Render Resume to Doc",
+          "description": "Renders a resume.json in the jsonresume.org standard - for example the output of Load JSON Resume, or an AI step's tailored version - into a Google Doc in your Drive, plus a PDF copy. It can only see the files it creates.",
+          "workflowAction": {
+            "inputs": [
+              {
+                "id": "resume",
+                "description": "The resume as JSON text in the jsonresume.org standard - typically the \"resume\" output of Load JSON Resume.",
+                "cardinality": "SINGLE",
+                "required": true,
+                "dataType": {
+                  "basicType": "STRING"
+                }
+              },
+              {
+                "id": "title",
+                "description": "Optional document title. Defaults to \"<name> - Resume\".",
+                "cardinality": "SINGLE",
+                "required": false,
+                "dataType": {
+                  "basicType": "STRING"
+                }
+              }
+            ],
+            "outputs": [
+              {
+                "id": "docId",
+                "description": "Drive file ID of the new Google Doc.",
+                "cardinality": "SINGLE",
+                "dataType": {
+                  "basicType": "STRING"
+                }
+              },
+              {
+                "id": "docUrl",
+                "description": "Link to the new Google Doc.",
+                "cardinality": "SINGLE",
+                "dataType": {
+                  "basicType": "STRING"
+                }
+              },
+              {
+                "id": "pdfFileId",
+                "description": "Drive file ID of the PDF copy. Empty if the PDF export failed; the Doc still exists.",
+                "cardinality": "SINGLE",
+                "dataType": {
+                  "basicType": "STRING"
+                }
+              },
+              {
+                "id": "pdfUrl",
+                "description": "Link to the PDF copy. Empty if the PDF export failed.",
+                "cardinality": "SINGLE",
+                "dataType": {
+                  "basicType": "STRING"
+                }
+              }
+            ],
+            "onConfigFunction": "onConfigRenderResume",
+            "onExecuteFunction": "onExecuteRenderResume"
           }
         }
       ]

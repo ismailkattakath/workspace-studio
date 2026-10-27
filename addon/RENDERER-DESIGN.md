@@ -1,15 +1,29 @@
 # Design: "Render Resume to Doc" — the companion step
 
-**Status: designed, not built.** The blocker is now CLEARED — `Load JSON Resume` ran on Google's
-servers on 2026-09-30 (`onExecute`, 0.91 s, Completed) and its real event payload is pinned in
-`test-loadjsonresume.mjs`. The platform contract is no longer a guess, so this design can be
-built against something observed instead of inferred.
+**Status: BUILT (2026-10-27), not yet run live.** The code is `RenderResume.gs`; the tests are
+`test-renderresume.mjs`. The blocker cleared first: `Load JSON Resume` ran on Google's servers on
+2026-09-30 (`onExecute`, 0.91 s, Completed), and its real event payload is pinned in
+`test-loadjsonresume.mjs`.
 
-Two of its four open questions are still open and still only answerable by installing:
-whether `drive.file` alone authorises both the create and the `/export`, and whether Gmail's
-native send step can attach a Drive file or only interpolate a URL.
+**Measured 2026-10-27**, with only `drive.file` + `script.external_request`:
 
-Everything below was verified on 2026-09-30 by running the request, not by reading about it.
+| Call | Result |
+|---|---|
+| Drive REST `files.create`, HTML → Google Doc (multipart) | **works** |
+| Docs API `documents.batchUpdate` on that Doc | **works** |
+| Drive REST `files/{id}/export?mimeType=application/pdf` | **works** |
+| Drive REST `files.create` of the PDF bytes | **works** |
+| `DocumentApp.create` / `openById` | **fails**: needs `auth/documents` |
+| `DriveApp.getFileById` | **fails**: needs `drive.readonly` or `drive` |
+
+That answers open question 2 below: **`drive.file` alone is enough**, so the scope price holds.
+
+**Gotcha found on the way:** the REST calls first returned **403** *"Google Drive API has not
+been used in project …"*. The hidden default Cloud project had the API off. Declaring the Drive
+v3 and Docs v1 advanced services in `appsscript.json` (`dependencies.enabledAdvancedServices`)
+fixed it, and **adds no scope**.
+
+The sections below up to "Verify these" were verified on 2026-09-30 by running the request.
 
 ## Two shortcuts that look obvious and are both dead
 
@@ -80,18 +94,29 @@ code. Strictly worse than `drive.file`.
 method only includes scopes that the script currently needs"* — so Drive REST can be called
 directly with `drive.file` instead of inheriting `DriveApp`'s all-or-nothing scope.
 
-## The design
+## The design (as built)
 
-**We own a Markdown serialiser. Google owns the layout engine.** That is the split the motto
+**We own an HTML serialiser. Google owns the layout engine.** That is the split the motto
 asks for — and `toPlainText()` already proves the serialiser shape is small and testable.
 
 ```
 tailored résumé string
-      ↓  toMarkdown()                      ← the only code we own
-      ↓  Drive multipart upload, mimeType application/vnd.google-apps.document
+      ↓  resumeToHtml()                    ← the only real code we own
+      ↓  Drive multipart upload (text/html), mimeType application/vnd.google-apps.document
       ↓  GET /drive/v3/files/{id}/export?mimeType=application/pdf
+      ↓  Drive multipart upload of the PDF bytes
 outputs: docId · docUrl · pdfFileId · pdfUrl   (all STRING, cardinality SINGLE)
 ```
+
+**Changed from the first draft of this design:**
+
+| Was | Now | Why |
+|---|---|---|
+| `toMarkdown()`, uploaded as `text/markdown` | `resumeToHtml()`, uploaded as `text/html` | HTML was this doc's own fallback (question 1). It is the measured path, and HTML can carry links, bold and lists without depending on Markdown dialect support |
+| PDF always, failure undefined | PDF is **best-effort**: an export failure keeps the Doc, returns empty `pdf*` outputs, and logs the reason | the Doc already exists. Failing the run would hide it from later steps |
+| no allowlist | `urlFetchWhitelist` added | a **versioned** deployment requires it (test deployments do not). It cannot say "any host", so it also narrows Load JSON Resume to the listed résumé hosts in a versioned deployment |
+| (unspecified) | `documents.batchUpdate` **not used** | measured to work, but nothing in the render needs it yet. Margins or fonts could use it later |
+| (unspecified) | the résumé is treated as **untrusted**: every value escaped, `href` only for `http(s)` without credentials, `basics.image` dropped | the input often comes from an AI step that read an inbox |
 
 Manifest adds exactly one scope:
 
@@ -125,11 +150,11 @@ targets Node and cannot run in Apps Script — no npm, no filesystem.
 
 ## Verify these on first install — none are knowable from here
 
-1. **Markdown→Doc fidelity** — headings, bullets, bold. If weak, swap the upload's
-   `text/markdown` for self-contained `text/html`; the pipeline is otherwise identical.
-2. **Does `drive.file` alone authorise both the create AND the `/export`** of the file we just
-   created? If export is refused, the fallback adds `drive.readonly` — **re-price the whole
-   recommendation if so**, because that is a real scope increase.
+1. **HTML→Doc fidelity**: headings, bullets, bold, links. The upload is now `text/html`
+   (it was `text/markdown` in the first draft). Still unverified on a real résumé: check the
+   first rendered Doc by eye.
+2. ~~Does `drive.file` alone authorise both the create AND the `/export`?~~ **ANSWERED
+   2026-10-27: yes.** Create, export and the PDF create all work with `drive.file` alone.
 3. **Can Gmail's native "Send a message" step attach a Drive file**, or only interpolate
    `pdfUrl` into the body? The indexed corpus is the developer docs only and contains no
    catalogue of native steps. Plan for a link; treat attachment as a bonus.

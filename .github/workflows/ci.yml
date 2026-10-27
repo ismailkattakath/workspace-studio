@@ -71,6 +71,12 @@ jobs:
       - name: Add-on contract tests
         run: nix run nixpkgs#nodejs -- addon/test-loadjsonresume.mjs
 
+      # The renderer's pure half: HTML escaping of the untrusted résumé, the
+      # href guard, section mapping, and the manifest contract (outputs,
+      # callbacks, card-field bindings, the two-scope bill, the allowlist).
+      - name: Renderer contract tests
+        run: nix run nixpkgs#nodejs -- addon/test-renderresume.mjs
+
       # Extraction is the layer most likely to break without any code change,
       # because it depends on a third party's HTML. A dry run writes nothing and
       # touches no database; it just proves pages still yield an article body.

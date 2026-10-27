@@ -116,18 +116,20 @@
       ];
 
       # ── The project's own test command. ───────────────────────────────────────
-      # Both of this repo's contract suites, which are also the two BLOCKING
+      # All three of this repo's contract suites, which are also the three BLOCKING
       # steps in .github/workflows/ci.yml. There is no test runner — each file IS
       # its suite, and each exits non-zero on failure (CLAUDE.md § Commands).
       #
-      # Both run clean inside the no-network sandbox because every dependency
+      # All run clean inside the no-network sandbox because every dependency
       # comes from the nixpkgs pin, so nothing is vendored by hand here:
       #   - test_chunk.py imports only `ingest`, whose three deps are in `py`;
-      #   - the .mjs uses node stdlib, and its ONE network section (two live
+      #   - both .mjs suites use node stdlib, and each one's ONE network section (two live
       #     JSON Resume registry fetches) is already written to `continue` with a
       #     `skip` line when the fetch throws. Sandboxed, those five live-resume
       #     assertions are skipped; the ~25 pure ones — parse, URL guard,
       #     formInputs shape, headline formatting, degenerate inputs — all run.
+      #     test-renderresume.mjs works the same way: only its registry
+      #     render checks skip; escaping, href guard and manifest contract run.
       #
       # NOT run here, on purpose: `./bench.sh`. It needs Postgres + pgvector + an
       # Ollama model, i.e. three services, so it stays the local gate CLAUDE.md
@@ -138,6 +140,7 @@
         command = ''
           python3 test_chunk.py
           node addon/test-loadjsonresume.mjs
+          node addon/test-renderresume.mjs
         '';
         packages = pkgs: devPackagesFor pkgs;
       };
@@ -192,8 +195,8 @@
         let
           # Narrow fileset for the gate. A bare `./.` copies the whole working
           # tree into the store on every edit, so touching `sources/` or
-          # `probes/` would rebuild a check that cannot even see them. These five
-          # paths are exactly what the two suites read.
+          # `probes/` would rebuild a check that cannot even see them. These
+          # paths are exactly what the three suites read.
           gateSrc = lib.fileset.toSource {
             root = ./.;
             fileset = lib.fileset.unions [
@@ -201,6 +204,9 @@
               ./test_chunk.py
               ./addon/test-loadjsonresume.mjs
               ./addon/LoadJsonResume.gs
+              ./addon/test-renderresume.mjs
+              ./addon/RenderResume.gs
+              ./addon/appsscript.json
             ];
           };
         in
@@ -245,7 +251,7 @@
                 echo "all ${toString (builtins.length requiredBins)} required binaries resolve." > "$out"
               '';
 
-          # GOES RED WHEN: either of this repo's contract suites fails. The real
+          # GOES RED WHEN: any of this repo's contract suites fails. The real
           # gate — see the `projectGate` binding for what it runs and what it
           # deliberately does not.
           project-gate =
