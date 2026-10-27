@@ -40,7 +40,7 @@ var DRIVE_UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files' +
 var DOCS_EXPORT_URL = 'https://docs.google.com/document/d/';
 var DOCS_API_URL = 'https://docs.googleapis.com/v1/documents/';
 var GOOGLE_DOC_MIME = 'application/vnd.google-apps.document';
-var PAGE_MARGIN_PT = 43.2; // 0.6 inch
+var PAGE_MARGIN_PT = 36; // 0.5 inch
 
 /**
  * Configuration card: the resume JSON, plus an optional title.
