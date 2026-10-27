@@ -39,8 +39,7 @@ const ctx = createContext({
   console, CardService: cardStub,
   OAuth2: { createService: () => oauthService },
   PropertiesService: { getUserProperties: props, getScriptProperties: props },
-  CacheService: { getUserCache: () => ({ get: () => 'f61fb2a3402b226570eb0d4e929af1066', put() {} }) },
-  LockService: { getUserLock: () => ({}) },
+  CacheService: { getUserCache: () => ({}) }, LockService: { getUserLock: () => ({}) },
 });
 let loadGlobals = [];
 for (const f of ['LoadJsonResume.gs', 'RenderResume.gs']) {
@@ -337,9 +336,8 @@ check('no card hint or title contains "<"', hints.every((h) => !h.includes('<'))
 // signed-in jsonresume.org account. No URL, paste or Drive input survives.
 const loadEl = elements.find((e) => e.id === 'loadJsonResume');
 check('Load declares no inputs', loadEl.workflowAction.inputs.length === 0);
-check('the connect card links "refresh" to this flow\'s page',
-  cardCalls.some(([k, a]) => k === 'setText' &&
-    String(a[0]).includes('<a href="https://studio.workspace.google.com/workflow/f61fb2a3402b226570eb0d4e929af1066">refresh</a>')));
+check('the connect card says to refresh, in bold, without a link',
+  cardCalls.some(([k, a]) => k === 'setText' && String(a[0]) === 'After connecting, <b>refresh</b> this page.'));
 check('the connect card offers "Connect JSON Resume" through an AuthorizationAction',
   cardCalls.some(([k, a]) => k === 'setText' && a[0] === 'Connect JSON Resume') &&
   cardCalls.some(([k]) => k === 'setAuthorizationAction'));

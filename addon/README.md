@@ -58,9 +58,13 @@ The step has **no fields**. Its card shows one button:
    your résumé as a GitHub gist it creates for you, using your GitHub sign-in (upstream
    `gistOperations.js`, read 2026-10-27). An email-and-password account cannot create one.
 2. Click **Connect JSON Resume** and approve **"Read your resume"** on jsonresume.org.
-3. **Refresh the Studio page** (the card's **refresh** link opens this flow fresh in a new tab).
-   Studio does not redraw a step card after a sign-in in another tab, and reopening the step
-   does not help, measured 2026-10-27. Clicking Connect again also shows it connected.
+3. **Refresh the Studio page.** Studio does not redraw a step card after a sign-in in another
+   tab, and reopening the step does not help, measured 2026-10-27. Clicking Connect again also
+   shows it connected. The card says **refresh** in bold rather than as a link: Studio strips
+   bold from card links and opens them in a new tab, so a link cannot refresh this page.
+
+   **The config event does carry the flow's id**
+   (`workflow.elementConfiguration.workflowId`, live 2026-10-27), should a link ever be wanted.
 
 **Known upstream bug:** signing in to jsonresume.org **with GitHub** during Connect lands on
 `/dashboard` instead of the approval screen
