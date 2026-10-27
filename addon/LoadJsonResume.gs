@@ -39,7 +39,8 @@ var TEXT_SECTIONS = ['work', 'projects', 'education', 'skills', 'certificates', 
  *
  * Proven live 2026-10-27: Studio renders the AuthorizationException card in a
  * step, /usercallback completes the sign-in, onExecute reads the token.
- * Studio does not refresh the card after sign-in, so the card says to reopen.
+ * Studio does not redraw the card after sign-in, and reopening the step does
+ * not help either; a page refresh does (live, 2026-10-27), so the card says so.
  */
 var JR_ORIGIN = 'https://jsonresume.org';
 
@@ -81,7 +82,7 @@ function jsonResumeConnectCard() {
       .setText('Connect JSON Resume')
       .setAuthorizationAction(CardService.newAuthorizationAction().setAuthorizationUrl(url)))
     .addWidget(CardService.newTextParagraph().setText(
-      'After connecting, close and reopen this step.'));
+      'After connecting, refresh this page.'));
   return [CardService.newCardBuilder()
     .setHeader(CardService.newCardHeader().setTitle('Load JSON Resume'))
     .addSection(section)
@@ -113,7 +114,7 @@ function jsonResumeService() {
 function jsonResumeAuthCallback(request) {
   var ok = jsonResumeService().handleCallback(request);
   return HtmlService.createHtmlOutput(ok
-    ? 'Connected to JSON Resume. Return to Workspace Studio and reopen the step.'
+    ? 'Connected to JSON Resume. Return to Workspace Studio and refresh the page.'
     : 'Not connected. Return to Workspace Studio and try again.');
 }
 
