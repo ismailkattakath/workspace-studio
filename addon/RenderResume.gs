@@ -259,7 +259,15 @@ function parseResumeInput(text) {
   try {
     resume = JSON.parse(raw);
   } catch (e) {
-    return { error: 'the input is not valid JSON.' };
+    // An AI step may add a sentence around its fenced JSON. Take the one
+    // fenced block if there is exactly one; anything else stays an error.
+    var blocks = raw.match(/```[a-zA-Z]*\s*\n[\s\S]*?\n?```/g) || [];
+    if (blocks.length !== 1) return { error: 'the input is not valid JSON.' };
+    try {
+      resume = JSON.parse(/^```[a-zA-Z]*\s*\n([\s\S]*?)\n?```$/.exec(blocks[0])[1]);
+    } catch (e2) {
+      return { error: 'the input is not valid JSON.' };
+    }
   }
   if (!resume || typeof resume !== 'object' || Array.isArray(resume)) {
     return { error: 'the input is not a JSON object.' };
@@ -267,7 +275,62 @@ function parseResumeInput(text) {
   if (!hasAnyKnownSection(resume)) {
     return { error: 'no jsonresume.org sections found (expected basics, work, education, skills or projects).' };
   }
+  var problems = resumeShapeProblems(resume);
+  if (problems.length) {
+    return { error: 'the input does not match the jsonresume.org schema: ' + problems.slice(0, 5).join('; ') +
+      (problems.length > 5 ? ' (and ' + (problems.length - 5) + ' more)' : '') + '.' };
+  }
   return { resume: resume };
+}
+
+// The jsonresume.org v1 schema's sections that are arrays of objects.
+var RESUME_ARRAY_SECTIONS = ['work', 'volunteer', 'education', 'awards', 'certificates', 'publications',
+  'skills', 'languages', 'interests', 'references', 'projects'];
+// Its fields that are arrays of strings, wherever they appear.
+var RESUME_STRING_LIST_FIELDS = ['highlights', 'keywords', 'courses', 'roles'];
+// Its date fields, which the schema constrains to the "iso8601" pattern.
+var RESUME_DATE_FIELDS = ['startDate', 'endDate', 'date', 'releaseDate'];
+var ISO8601_PARTIAL = /^([1-2][0-9]{3}-[0-1][0-9]-[0-3][0-9]|[1-2][0-9]{3}-[0-1][0-9]|[1-2][0-9]{3})$/;
+
+/**
+ * Structural check against the jsonresume.org v1 schema, for input that an AI
+ * step rewrote. Studio's Gemini steps cannot enforce a response schema, so the
+ * renderer rejects a drifted shape LOUDLY instead of rendering it quietly.
+ * Unknown extra keys are allowed (the schema allows them too).
+ */
+function resumeShapeProblems(resume) {
+  var problems = [];
+  if ('basics' in resume && !isPlainObject(resume.basics)) problems.push('basics must be an object');
+  if (isPlainObject(resume.basics) && 'name' in resume.basics && typeof resume.basics.name !== 'string') {
+    problems.push('basics.name must be a string');
+  }
+  RESUME_ARRAY_SECTIONS.forEach(function (section) {
+    if (!(section in resume)) return;
+    var list = resume[section];
+    if (!Array.isArray(list)) { problems.push(section + ' must be an array'); return; }
+    list.forEach(function (entry, i) {
+      var at = section + '[' + i + ']';
+      if (!isPlainObject(entry)) { problems.push(at + ' must be an object'); return; }
+      RESUME_STRING_LIST_FIELDS.forEach(function (field) {
+        if (!(field in entry)) return;
+        var v = entry[field];
+        if (!Array.isArray(v) || v.some(function (s) { return typeof s !== 'string'; })) {
+          problems.push(at + '.' + field + ' must be an array of strings');
+        }
+      });
+      RESUME_DATE_FIELDS.forEach(function (field) {
+        if (!(field in entry) || entry[field] === '') return;
+        if (typeof entry[field] !== 'string' || !ISO8601_PARTIAL.test(entry[field])) {
+          problems.push(at + '.' + field + ' must be YYYY, YYYY-MM or YYYY-MM-DD');
+        }
+      });
+    });
+  });
+  return problems;
+}
+
+function isPlainObject(v) {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
 function docTitleFor(resume, configured) {

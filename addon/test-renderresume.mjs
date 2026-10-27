@@ -146,6 +146,27 @@ check('a ```json fence from an AI step is stripped',
   ctx.parseResumeInput('```json\n{"basics":{"name":"A"}}\n```').resume?.basics?.name === 'A');
 check('a bare ``` fence is stripped',
   ctx.parseResumeInput('```\n{"work":[]}\n```').resume !== undefined);
+check('one fenced block inside prose is taken',
+  ctx.parseResumeInput('Here is the tailored resume:\n```json\n{"basics":{"name":"A"}}\n```\nGood luck!').resume?.basics?.name === 'A');
+check('two fenced blocks are an error',
+  !!ctx.parseResumeInput('```json\n{"basics":{"name":"A"}}\n```\n```json\n{"basics":{"name":"B"}}\n```').error);
+
+// ---- jsonresume.org shape (AI-rewritten input must not drift) ---------------
+const shapeErr = (o) => ctx.parseResumeInput(JSON.stringify(o)).error || '';
+check('a schema-valid resume passes',
+  shapeErr({ basics: { name: 'A' }, work: [{ name: 'X', startDate: '2024-08', endDate: '2026-03-01', highlights: ['h'] }],
+    skills: [{ name: 'S', keywords: ['k'] }], education: [{ startDate: '2006', courses: [] }] }) === '');
+check('work as an object is rejected', /work must be an array/.test(shapeErr({ work: { name: 'X' } })));
+check('a string entry is rejected', /work\[0\] must be an object/.test(shapeErr({ work: ['X'] })));
+check('highlights as a string is rejected',
+  /work\[0\]\.highlights must be an array of strings/.test(shapeErr({ work: [{ highlights: 'h' }] })));
+check('a prose date is rejected',
+  /work\[0\]\.startDate must be YYYY/.test(shapeErr({ work: [{ startDate: 'Aug 2024' }] })));
+check('an empty endDate (current role) passes', shapeErr({ work: [{ startDate: '2024', endDate: '' }] }) === '');
+check('basics.name as a number is rejected', /basics\.name must be a string/.test(shapeErr({ basics: { name: 1 } })));
+check('extra unknown keys are allowed', shapeErr({ basics: { name: 'A' }, meta: { x: 1 }, work: [{ foo: 'bar' }] }) === '');
+check('problems are capped at 5 with a count',
+  /\(and 1 more\)/.test(shapeErr({ work: ['a', 'b', 'c', 'd', 'e', 'f'] })));
 
 // ---- title ------------------------------------------------------------------
 check('title defaults to the name', ctx.docTitleFor({ basics: { name: 'Ada' } }, '') === 'Ada — Résumé');
