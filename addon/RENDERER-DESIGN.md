@@ -116,7 +116,7 @@ outputs: docId · docUrl · pdfFileId · pdfUrl   (all STRING, cardinality SINGL
 | `toMarkdown()`, uploaded as `text/markdown` | `resumeToHtml()`, uploaded as `text/html` | HTML was this doc's own fallback (question 1). It is the measured path, and HTML can carry links, bold and lists without depending on Markdown dialect support |
 | PDF always, failure undefined | PDF is **best-effort**: an export failure keeps the Doc, returns empty `pdf*` outputs, and logs the reason | the Doc already exists. Failing the run would hide it from later steps |
 | no allowlist | `urlFetchWhitelist` added | a **versioned** deployment requires it. It cannot say "any host", and a declared list is enforced, so it also narrows Load JSON Resume to the listed résumé hosts |
-| (unspecified) | `documents.batchUpdate` sets **page margins** only (0.6 in), best-effort | the first live render ran 6 pages. batchUpdate cannot edit named styles, so heading and body sizes are inline styles on each element instead |
+| (unspecified) | `documents.batchUpdate` sets **page margins** only (0.6 in), best-effort | the first live render ran 6 pages. heading and body sizes are inline styles on each element. `updateNamedStyle` exists and is the fallback, but inline styles are testable offline and add no API call |
 | (unspecified) | the résumé is treated as **untrusted**: every value escaped, `href` only for `http(s)` without credentials, `basics.image` dropped | the input often comes from an AI step that read an inbox |
 
 Manifest adds exactly one scope:

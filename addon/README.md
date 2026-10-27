@@ -221,10 +221,13 @@ findings came back and are fixed:
 
 **Why #1 is fixed with inline styles, not the Docs API alone:** the import maps h1–h3 to the
 Doc's named Heading styles (H1 at Arial 24) and did not carry the body's font-size down to them.
-`documents.batchUpdate` has no request that edits a named style, only text and paragraph ranges,
-so it cannot fix heading sizes globally. An inline style on each element is the one place the
-import reads per paragraph. It is still a **hypothesis until the next live run** shows the page
-count.
+An inline style on each element pins the size per paragraph. `documents.batchUpdate` also has an
+`updateNamedStyle` request that could restyle Heading 1–3 instead. Inline won because it lives in
+the HTML, which the tests check offline, and it adds no API call or failure mode.
+`updateNamedStyle` is the fallback if a re-run shows the import dropping inline sizes. The page
+count is still a **hypothesis until the next live run**. If the margins also look wide there,
+check whether the import set a per-section `sectionStyle` margin that overrides the document
+margin.
 
 **Why #2 uses a separate line, not a right-aligned tab:** a tab stop needs a Docs API range edit
 after import, and a two-cell table imports with borders and confuses ATS parsers. A paragraph is
@@ -265,7 +268,11 @@ Declaring the service turns it on and **adds no scope**. The code never calls th
 **versioned** one. Entries must be `https://` with a full domain and a path, with at most one
 leading `*` for subdomains. **There is no "any host" entry.** Once declared, the list is
 enforced: *"script projects can't access URLs that have not been added to the allowlist"*. The
-page does not exempt test deployments, so assume it applies to them too (unverified). **Load
+page does not exempt test deployments. **But the 2026-10-27 live run contradicts a strict
+reading:** under a test deployment with the list declared, Load JSON Resume fetched
+`registry.jsonresume.org/{user}.json`, which 301s to `jsonresume.org`, then not on the list.
+So either a test deployment does not enforce the list, or redirect targets are not checked.
+Which one is unmeasured. A **versioned** deployment is where the list certainly applies. **Load
 JSON Resume can therefore fetch only from the listed hosts:** `registry.jsonresume.org`,
 `jsonresume.org` (the registry's redirect target), `raw.githubusercontent.com`,
 `gist.githubusercontent.com` and `gitlab.com`. To serve a résumé

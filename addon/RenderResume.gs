@@ -360,8 +360,10 @@ function joinNonEmpty(parts, sep) {
  * pages: the import maps h1/h2/h3 to the Doc's named Heading styles (H1 at
  * Arial 24) and did not carry the body's font-size down to them. An inline
  * style on the element itself is the one place the import reads per
- * paragraph. The Docs API cannot fix this either: batchUpdate has no request
- * that edits a named style, only text and paragraph ranges.
+ * paragraph. (batchUpdate's updateNamedStyle could restyle Heading 1-3
+ * instead. Inline styles were chosen because they live in the HTML this file
+ * tests offline, and cost no extra API call or failure mode. If a re-run
+ * shows the import dropping them, updateNamedStyle is the fallback.)
  */
 var FONT = 'font-family:Arial,sans-serif;line-height:1.15;';
 var STYLES = {
