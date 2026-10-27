@@ -1,8 +1,8 @@
 /**
  * "Load JSON Resume" — a custom step for Google Workspace Studio.
  *
- * Fetches a resume.json in the jsonresume.org standard from a URL the user
- * configures, and emits it as flow outputs for later steps to consume.
+ * Loads the signed-in user's resume from jsonresume.org ("Connect JSON
+ * Resume", OAuth 2.1), validates it, and emits it as flow outputs.
  *
  * WHAT THIS STEP DELIBERATELY DOES NOT DO: tailor the resume. Workspace Studio
  * flows already have a native "ask Gemini" step, so the tailoring belongs
@@ -25,120 +25,157 @@
 // Hard caps. A configuration field is user-supplied and a remote document is
 // not under our control, so both are bounded rather than trusted.
 var MAX_BYTES = 2 * 1024 * 1024; // a resume.json far past this is not a resume
-var FETCH_TIMEOUT_MS = 20 * 1000;
 
 // Sections rendered into resumeText, in the order a reader expects them.
 var TEXT_SECTIONS = ['work', 'projects', 'education', 'skills', 'certificates', 'awards'];
 
 /**
- * Builds the configuration card.
+ * ONE SOURCE ON PURPOSE (operator decision, 2026-10-27): the signed-in user's
+ * own jsonresume.org resume, through "Sign in with JSON Resume" (OAuth 2.1,
+ * PKCE). No URL, paste or Drive field. Connecting tells the user they need a
+ * JSON Resume account, and its dashboard keeps the resume (a GitHub gist it
+ * creates for them; GitHub sign-in is required there, measured in upstream's
+ * gistOperations.js on 2026-10-27).
  *
- * TAKES NO EVENT PARAMETER, and does not prefill. An earlier version read saved
- * values out of `event.commonEventObject.formInputs` — that was wrong on both
- * counts. Every Studio example declares this callback bare
- * (`function onConfigFunctionCreateDocument() {`), and no Studio page uses
- * `setValue` to restore a field. Persistence is Studio's job, done through the
- * `setFieldName` <-> manifest `inputs[].id` binding below; the card only has to
- * describe the field.
- *
- * ONE FIELD ON PURPOSE. The promise of this step is "point it at your
- * resume.json and it works", so anything else asked here is friction.
+ * Proven live 2026-10-27: Studio renders the AuthorizationException card in a
+ * step, /usercallback completes the sign-in, onExecute reads the token.
+ * Studio does not refresh the card after sign-in, so the card says to reopen.
  */
+var JR_ORIGIN = 'https://jsonresume.org';
+
 function onConfigLoadJsonResume() {
-  var urlInput = CardService.newTextInput()
-    .setFieldName('resumeUrl') // MUST equal the manifest inputs[].id — that binding is
-                               // what delivers the value to onExecuteFunction.
-    .setTitle('Your JSON Resume URL')
-    // {curly} placeholders, never <angle> ones: Studio renders hint text as
-    // HTML and swallowed <username> whole (live run, 2026-10-27). The hosts
-    // listed must match urlFetchWhitelist in appsscript.json; the test checks.
-    .setHint(
-      'HTTPS on one of these hosts: ' +
-      'https://registry.jsonresume.org/{username}.json (or https://jsonresume.org/@{username}.json)  ·  ' +
-      'https://raw.githubusercontent.com/{user}/{repo}/main/resume.json  ·  ' +
-      'https://gist.githubusercontent.com/{user}/{id}/raw/resume.json  ·  ' +
-      'https://gitlab.com/{user}/{repo}/-/raw/main/resume.json'
-    )
-    // Lets the user pipe a variable from an EARLIER step into this field instead
-    // of typing a literal URL — e.g. a URL an upstream step looked up. Every
-    // Studio example attaches this to its TextInput; without it the field only
-    // accepts hand-typed text.
-    .setHostAppDataSource(
-      CardService.newHostAppDataSource().setWorkflowDataSource(
-        CardService.newWorkflowDataSource().setIncludeVariables(true)
-      )
-    );
+  var service = jsonResumeService();
+  if (!service.hasAccess()) {
+    CardService.newAuthorizationException()
+      .setAuthorizationUrl(service.getAuthorizationUrl())
+      .setResourceDisplayName('JSON Resume')
+      .setCustomUiCallback('jsonResumeConnectCard')
+      .throwException();
+  }
+  return connectedCard();
+}
 
+function connectedCard() {
+  var who = PropertiesService.getUserProperties().getProperty('JR_USERNAME');
   var section = CardService.newCardSection()
-    .addWidget(
-      CardService.newTextParagraph().setText(
-        'Loads a resume in the <b>jsonresume.org</b> standard and makes it available ' +
-        'to the rest of this flow. Pair it with an AI step to tailor the resume to a ' +
-        'job posting.'
-      )
-    )
-    .addWidget(urlInput);
-
+    .addWidget(CardService.newTextParagraph().setText(
+      'Connected to <b>JSON Resume</b>' + (who ? ' as <b>@' + escapeHtml(who) + '</b>' : '') +
+      '. This step loads your resume from jsonresume.org each time the flow runs.'))
+    .addWidget(CardService.newTextButton()
+      .setText('Disconnect')
+      .setOnClickAction(CardService.newAction().setFunctionName('disconnectJsonResume')));
   return CardService.newCardBuilder()
     .setHeader(CardService.newCardHeader().setTitle('Load JSON Resume'))
     .addSection(section)
     .build();
 }
 
+/** The custom sign-in card a public add-on needs instead of Google's generic one. */
+function jsonResumeConnectCard() {
+  var url = jsonResumeService().getAuthorizationUrl();
+  var section = CardService.newCardSection()
+    .addWidget(CardService.newTextParagraph().setText(
+      'Connect your <b>JSON Resume</b> account to load your resume. ' +
+      'No account yet? Create one at jsonresume.org (sign in with GitHub) and add your resume in its dashboard.'))
+    .addWidget(CardService.newTextButton()
+      .setText('Connect JSON Resume')
+      .setAuthorizationAction(CardService.newAuthorizationAction().setAuthorizationUrl(url)))
+    .addWidget(CardService.newTextParagraph().setText(
+      'After connecting, close and reopen this step.'));
+  return [CardService.newCardBuilder()
+    .setHeader(CardService.newCardHeader().setTitle('Load JSON Resume'))
+    .addSection(section)
+    .build()];
+}
+
+function disconnectJsonResume() {
+  jsonResumeService().reset();
+  PropertiesService.getUserProperties().deleteProperty('JR_USERNAME');
+  return CardService.newActionResponseBuilder()
+    .setNavigation(CardService.newNavigation().updateCard(jsonResumeConnectCard()[0]))
+    .build();
+}
+
+/** OAuth2 for Apps Script (vendored at aae9287, the #513 public-client refresh fix). */
+function jsonResumeService() {
+  return OAuth2.createService('jsonresume')
+    .setAuthorizationBaseUrl(JR_ORIGIN + '/oauth/authorize')
+    .setTokenUrl(JR_ORIGIN + '/api/oauth/token')
+    .setClientId(jsonResumeClientId())
+    .setScope('resume:read')
+    .generateCodeVerifier()
+    .setCallbackFunction('jsonResumeAuthCallback')
+    .setPropertyStore(PropertiesService.getUserProperties())
+    .setCache(CacheService.getUserCache())
+    .setLock(LockService.getUserLock());
+}
+
+function jsonResumeAuthCallback(request) {
+  var ok = jsonResumeService().handleCallback(request);
+  return HtmlService.createHtmlOutput(ok
+    ? 'Connected to JSON Resume. Return to Workspace Studio and reopen the step.'
+    : 'Not connected. Return to Workspace Studio and try again.');
+}
+
+/**
+ * The client id, registered once per deployment through jsonresume.org's
+ * self-serve dynamic client registration (public client, no secret; measured
+ * 2026-10-27). Kept in Script Properties: an identifier, not a secret.
+ */
+function jsonResumeClientId() {
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty('JR_CLIENT_ID');
+  if (id) return id;
+  var response = UrlFetchApp.fetch(JR_ORIGIN + '/api/oauth/register', {
+    method: 'post',
+    contentType: 'application/json',
+    muteHttpExceptions: true,
+    payload: JSON.stringify({
+      client_name: 'JSON Resume for Workspace Studio',
+      redirect_uris: ['https://script.google.com/macros/d/' + ScriptApp.getScriptId() + '/usercallback']
+    })
+  });
+  if (response.getResponseCode() >= 300) {
+    throw new Error('jsonresume.org client registration returned HTTP ' + response.getResponseCode());
+  }
+  id = JSON.parse(response.getContentText()).client_id;
+  props.setProperty('JR_CLIENT_ID', id);
+  return id;
+}
 
 /**
  * Runs when the step executes.
  *
- * MUST return every output declared in appsscript.json — Workspace Studio
- * errors the step otherwise — so every failure path below still returns the
- * full set, with the reason in `resumeText` rather than an exception that tells
- * the user nothing.
+ * MUST return every output declared in appsscript.json, or fail the step with
+ * a message the user can act on (failStep).
  */
 function onExecuteLoadJsonResume(event) {
-  // DUMP THE EVENT FIRST. Reading the wrong object is the defining bug of this
-  // platform's steps, and the only way to settle it is empirically: this line
-  // puts the real payload in the Apps Script Executions view on run one, so a
-  // future shape change is diagnosed in seconds instead of argued about. The
-  // quickstart's own sample does the same thing.
-  console.log('LoadJsonResume event: ' + JSON.stringify(event));
-
-  // THE STUDIO PATH, not the generic add-on one. CONFIRMED BY A LIVE RUN
-  // (2026-09-30), not inferred — the logged payload was, verbatim:
-  //
-  //   {"clientPlatform":"web",
-  //    "commonEventObject":{"platform":"WEB","hostApp":"WORKFLOW"},
-  //    "workflow":{"triggerEventSource":"TRIGGER_EVENT_SOURCE_AUTOMATED",
-  //      "actionInvocation":{"triggerId":"…",
-  //        "inputs":{"resumeUrl":{"stringValues":["https://…"]}}},
-  //      "executionMetadata":{}},
-  //    "hostApp":"flows"}
-  //
-  // Note commonEventObject: platform and hostApp, and NOTHING else. No
-  // formInputs key to fall back on. An earlier version read
-  // commonEventObject.formInputs[...] and would have resolved undefined against
-  // this exact object — the URL comes back empty and the user sees "no URL is
-  // configured" while looking at the URL they typed.
+  // The envelope only: the resume itself is personal data and never logged.
   var inputs = (event && event.workflow && event.workflow.actionInvocation &&
                 event.workflow.actionInvocation.inputs) || {};
-  var url = readActionInput(inputs, 'resumeUrl');
+  console.log('LoadJsonResume inputs present: ' + JSON.stringify(Object.keys(inputs)));
 
-  var problem = validateUrl(url);
-  if (problem) {
-    return failStep('Could not load resume: ' + problem);
+  var service = jsonResumeService();
+  if (!service.hasAccess()) {
+    return failStep('Could not load resume: not connected to JSON Resume. Open this step and click "Connect JSON Resume".');
   }
 
   var raw;
   try {
-    var response = UrlFetchApp.fetch(url, {
-      method: 'get',
-      muteHttpExceptions: true, // handle the status ourselves; a 404 body is not a resume
-      followRedirects: true,
-      validateHttpsCertificates: true,
-      headers: { Accept: 'application/json' }
+    var response = UrlFetchApp.fetch(JR_ORIGIN + '/api/oauth/resume', {
+      headers: { Authorization: 'Bearer ' + service.getAccessToken(), Accept: 'application/json' },
+      muteHttpExceptions: true
     });
     var status = response.getResponseCode();
+    if (status === 401) {
+      service.reset();
+      return failStep('Could not load resume: the JSON Resume connection expired or was revoked. Open this step and connect again.');
+    }
+    if (status === 404) {
+      return failStep('Could not load resume: your JSON Resume account has no resume yet. Create it in the jsonresume.org dashboard.');
+    }
     if (status < 200 || status >= 300) {
-      return failStep('Could not load resume: the URL returned HTTP ' + status + '.');
+      return failStep('Could not load resume: jsonresume.org returned HTTP ' + status + '.');
     }
     raw = response.getContentText();
   } catch (err) {
@@ -150,17 +187,16 @@ function onExecuteLoadJsonResume(event) {
       Math.round(MAX_BYTES / 1024 / 1024) + ' MB limit.');
   }
 
-  var resume;
+  var payload;
   try {
-    resume = JSON.parse(raw);
+    payload = JSON.parse(raw);
   } catch (err) {
-    // The commonest cause by far: a GitHub *page* URL instead of a raw one, so
-    // the body is HTML. Name that specifically rather than echoing a parser error.
-    var hint = raw.slice(0, 200).indexOf('<') === 0
-      ? ' The URL returned HTML, not JSON — if this is a GitHub or GitLab link, use the "raw" URL.'
-      : '';
-    return failStep('Could not load resume: the document is not valid JSON.' + hint);
+    return failStep('Could not load resume: jsonresume.org did not return JSON.');
   }
+  // The endpoint wraps it: { username, url, resume } (measured 2026-10-27).
+  var unwrapped = unwrapResumePayload(payload);
+  if (unwrapped.username) PropertiesService.getUserProperties().setProperty('JR_USERNAME', unwrapped.username);
+  var resume = unwrapped.resume;
 
   if (!resume || typeof resume !== 'object' || Array.isArray(resume)) {
     return failStep('Could not load resume: the document is not a JSON object.');
@@ -171,6 +207,14 @@ function onExecuteLoadJsonResume(event) {
   if (!hasAnyKnownSection(resume)) {
     return failStep('Could not load resume: no jsonresume.org sections found ' +
       '(expected at least one of basics, work, education, skills, projects).');
+  }
+  // The base resume FAILS on a drifted shape rather than being repaired
+  // (operator decision, 2026-10-27): the fix belongs in the source.
+  // resumeShapeProblems lives in RenderResume.gs (one global scope).
+  var problems = resumeShapeProblems(resume);
+  if (problems.length) {
+    return failStep('Could not load resume: it does not match the jsonresume.org schema: ' +
+      problems.slice(0, 5).join('; ') + (problems.length > 5 ? ' (and ' + (problems.length - 5) + ' more)' : '') + '.');
   }
 
   var basics = (resume.basics && typeof resume.basics === 'object') ? resume.basics : {};
@@ -243,22 +287,6 @@ function outputs(resume, resumeText, name, label, email) {
     .setVariableDataMap(variableDataMap);
   var hostAppAction = AddOnsResponseService.newHostAppAction().setWorkflowAction(workflowAction);
   return AddOnsResponseService.newRenderActionBuilder().setHostAppAction(hostAppAction).build();
-}
-
-/**
- * HTTPS only, and no credentials in the URL.
- *
- * Not decoration: a configuration field is user-supplied, plain http would send
- * the request in the clear, and a `user:pass@host` URL would put a secret into
- * a stored step configuration where it does not belong.
- */
-function validateUrl(url) {
-  if (!url) return 'no URL is configured. Open the step and set your JSON Resume URL.';
-  if (url.slice(0, 8).toLowerCase() !== 'https://') return 'the URL must start with https://.';
-  if (url.indexOf('@') !== -1 && url.indexOf('@') < url.indexOf('/', 8)) {
-    return 'the URL must not contain credentials.';
-  }
-  return '';
 }
 
 function hasAnyKnownSection(resume) {
@@ -372,4 +400,13 @@ function str(v) {
 
 function nonEmpty(v) {
   return !!v && String(v).length > 0;
+}
+
+/** { username, resume } from /api/oauth/resume's body; a bare resume is accepted too. */
+function unwrapResumePayload(payload) {
+  if (payload && typeof payload === 'object' && !Array.isArray(payload) &&
+      payload.resume && typeof payload.resume === 'object') {
+    return { username: str(payload.username), resume: payload.resume };
+  }
+  return { username: '', resume: payload };
 }

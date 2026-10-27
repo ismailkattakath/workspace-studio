@@ -23,11 +23,7 @@
   "urlFetchWhitelist": [
     "https://www.googleapis.com/",
     "https://docs.googleapis.com/",
-    "https://registry.jsonresume.org/",
-    "https://jsonresume.org/",
-    "https://raw.githubusercontent.com/",
-    "https://gist.githubusercontent.com/",
-    "https://gitlab.com/"
+    "https://jsonresume.org/"
   ],
   "addOns": {
     "common": {
@@ -40,19 +36,9 @@
           "id": "loadJsonResume",
           "state": "ACTIVE",
           "name": "Load JSON Resume",
-          "description": "Fetches a resume.json in the jsonresume.org standard from the JSON Resume registry, a GitHub raw file or gist, or a GitLab raw file, and emits it as outputs for later steps.",
+          "description": "Loads your resume from your JSON Resume account (Connect JSON Resume), validates it against the jsonresume.org schema, and emits it as outputs for later steps.",
           "workflowAction": {
-            "inputs": [
-              {
-                "id": "resumeUrl",
-                "description": "Resume URL",
-                "cardinality": "SINGLE",
-                "required": true,
-                "dataType": {
-                  "basicType": "STRING"
-                }
-              }
-            ],
+            "inputs": [],
             "outputs": [
               {
                 "id": "resume",

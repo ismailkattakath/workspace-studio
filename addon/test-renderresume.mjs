@@ -29,7 +29,18 @@ const cardCalls = [];
 const cardStub = new Proxy(function () {}, {
   get: (_t, k) => (k === 'then' ? undefined : (...args) => { cardCalls.push([k, args]); return cardStub; }),
 });
-const ctx = createContext({ console, CardService: cardStub });
+// OAuth2 / Properties stubs: a signed-out user with a registered client, so
+// onConfigLoadJsonResume takes the "Connect JSON Resume" path offline.
+const props = () => ({ getProperty: (k) => (k === 'JR_CLIENT_ID' ? 'test-client' : null), setProperty() {}, deleteProperty() {} });
+const oauthService = new Proxy({}, {
+  get: (_t, k) => (k === 'hasAccess' ? () => false : k === 'getAuthorizationUrl' ? () => 'https://jsonresume.org/oauth/authorize?x' : () => oauthService),
+});
+const ctx = createContext({
+  console, CardService: cardStub,
+  OAuth2: { createService: () => oauthService },
+  PropertiesService: { getUserProperties: props, getScriptProperties: props },
+  CacheService: { getUserCache: () => ({}) }, LockService: { getUserLock: () => ({}) },
+});
 let loadGlobals = [];
 for (const f of ['LoadJsonResume.gs', 'RenderResume.gs']) {
   if (f === 'RenderResume.gs') loadGlobals = Object.keys(ctx);
@@ -314,17 +325,28 @@ check('project roles still show', proj.includes('Lead'));
 
 // #6/#7 CARD HINTS: Studio renders hint text as HTML, so an <angle>
 // placeholder vanishes. Build both cards through the stub and read the text.
+ctx.jsonResumeConnectCard();
 ctx.onConfigLoadJsonResume();
 ctx.onConfigRenderResume();
 const hints = cardCalls.filter(([k]) => k === 'setHint' || k === 'setTitle').map(([, a]) => String(a[0]));
-check('card hints were captured', hints.length >= 4, String(hints.length));
+check('card hints were captured', hints.length >= 2, String(hints.length));
 check('no card hint or title contains "<"', hints.every((h) => !h.includes('<')), JSON.stringify(hints.filter((h) => h.includes('<'))));
-const loadHint = cardCalls.find(([k, a]) => k === 'setHint' && String(a[0]).includes('registry.jsonresume.org'))?.[1][0] || '';
-const hintHosts = [...loadHint.matchAll(/https:\/\/([^/\s]+)\//g)].map((m) => m[1]).sort();
-const resumeHosts = allow.map((u) => u.replace(/^https:\/\//, '').split('/')[0]).filter((h) => !h.endsWith('googleapis.com')).sort();
-check('Load hint lists exactly the allowlisted résumé hosts',
-  JSON.stringify(hintHosts) === JSON.stringify(resumeHosts), `${JSON.stringify(hintHosts)} vs ${JSON.stringify(resumeHosts)}`);
-check('Load hint no longer promises "any HTTPS URL"', !/any HTTPS URL/i.test(loadHint));
+
+// LOAD IS CONNECT-ONLY (operator decision, 2026-10-27): one source, the
+// signed-in jsonresume.org account. No URL, paste or Drive input survives.
+const loadEl = elements.find((e) => e.id === 'loadJsonResume');
+check('Load declares no inputs', loadEl.workflowAction.inputs.length === 0);
+check('the connect card offers "Connect JSON Resume" through an AuthorizationAction',
+  cardCalls.some(([k, a]) => k === 'setText' && a[0] === 'Connect JSON Resume') &&
+  cardCalls.some(([k]) => k === 'setAuthorizationAction'));
+check('the allowlist is jsonresume.org plus Google APIs only',
+  JSON.stringify([...allow].sort()) === JSON.stringify(['https://docs.googleapis.com/', 'https://jsonresume.org/', 'https://www.googleapis.com/']),
+  JSON.stringify(allow));
+check('the /api/oauth/resume wrapper is unwrapped',
+  ctx.unwrapResumePayload({ username: 'u', url: 'x', resume: { basics: { name: 'A' } } }).resume.basics.name === 'A' &&
+  ctx.unwrapResumePayload({ username: 'u', resume: {} }).username === 'u');
+check('a bare resume body passes through unwrapped',
+  ctx.unwrapResumePayload({ basics: { name: 'B' } }).resume.basics.name === 'B');
 
 // #6/#8 MANIFEST TEXT: no "<" anywhere, and output descriptions short enough
 // to read as a variable chip ("Step 2: Doc URL").

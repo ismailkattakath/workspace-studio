@@ -49,14 +49,13 @@ const check = (name, cond, detail = '') => {
   else { console.log(`  FAIL ${name} ${detail}`); failures.push(name); }
 };
 
-// ---- URL guard -------------------------------------------------------------
-check('rejects an empty URL', ctx.validateUrl('') !== '');
-check('rejects plain http', ctx.validateUrl('http://example.com/resume.json') !== '');
-check('rejects credentials in the URL', ctx.validateUrl('https://u:p@example.com/r.json') !== '');
-check('accepts a registry URL', ctx.validateUrl('https://registry.jsonresume.org/x.json') === '');
-check('accepts an @ in the PATH, not the host',
-  ctx.validateUrl('https://example.com/@scope/resume.json') === '',
-  ctx.validateUrl('https://example.com/@scope/resume.json'));
+// ---- the /api/oauth/resume body -------------------------------------------
+// Load is Connect-only (2026-10-27): the body is { username, url, resume }.
+check('unwraps { username, resume }',
+  ctx.unwrapResumePayload({ username: 'u', url: 'x', resume: { basics: { name: 'A' } } }).resume.basics.name === 'A');
+check('keeps the username', ctx.unwrapResumePayload({ username: 'u', resume: {} }).username === 'u');
+check('a bare resume passes through', ctx.unwrapResumePayload({ basics: { name: 'B' } }).resume.basics.name === 'B');
+check('a non-object resume field is not unwrapped', ctx.unwrapResumePayload({ resume: 'x' }).resume.resume === 'x');
 
 // ---- Studio action-invocation shape ---------------------------------------
 // THESE TESTS USED TO ENCODE THE BUG. They asserted the generic add-on card
