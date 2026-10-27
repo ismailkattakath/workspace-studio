@@ -103,7 +103,7 @@
           "id": "renderResume",
           "state": "ACTIVE",
           "name": "Render Resume to Doc",
-          "description": "Renders a resume.json in the jsonresume.org standard - for example the output of Load JSON Resume, or an AI step's tailored version - into a Google Doc in your Drive, plus a PDF copy. It can only see the files it creates.",
+          "description": "Renders a resume.json in the jsonresume.org standard - for example the output of Load JSON Resume, or an AI step's tailored version - into a Google Doc in your Drive, with PDF and DOCX download links. It can only see the files it creates.",
           "workflowAction": {
             "inputs": [
               {
@@ -143,16 +143,16 @@
                 }
               },
               {
-                "id": "pdfFileId",
-                "description": "PDF file ID",
+                "id": "pdfUrl",
+                "description": "PDF download link",
                 "cardinality": "SINGLE",
                 "dataType": {
                   "basicType": "STRING"
                 }
               },
               {
-                "id": "pdfUrl",
-                "description": "PDF URL",
+                "id": "docxUrl",
+                "description": "DOCX download link",
                 "cardinality": "SINGLE",
                 "dataType": {
                   "basicType": "STRING"

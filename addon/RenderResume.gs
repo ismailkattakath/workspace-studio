@@ -3,20 +3,25 @@
  *
  * Takes a resume.json STRING (typically Load JSON Resume's `resume` output, or
  * an AI step's tailored rewrite of it), renders it to HTML, and has Google
- * convert that HTML into a Google Doc. It then exports the Doc to PDF and saves
- * the PDF beside it. Design and measured evidence: RENDERER-DESIGN.md.
+ * convert that HTML into a Google Doc. Design and measured evidence:
+ * RENDERER-DESIGN.md.
  *
  *   resume string -> resumeToHtml() -> Drive files.create (HTML -> Google Doc)
- *                 -> files/{id}/export?mimeType=application/pdf -> files.create (PDF)
- *   outputs: docId, docUrl, pdfFileId, pdfUrl (all STRING)
+ *                 -> documents.batchUpdate (margins, Normal text style)
+ *   outputs: docId, docUrl, pdfUrl, docxUrl (all STRING)
+ *
+ * THE DOC IS THE ONLY ARTIFACT. pdfUrl and docxUrl are Docs' own export links,
+ * built from the id: they download whatever the Doc says NOW, so a hand edit
+ * to the Doc is never out of step with a stored copy. A stored PDF was built
+ * once and removed (2026-10-27); RENDERER-DESIGN.md says when it comes back.
  *
  * WE OWN THE HTML SERIALISER, AND GOOGLE OWNS THE LAYOUT ENGINE. resumeToHtml()
  * is the only real logic here, and it is pure JavaScript, so
  * test-renderresume.mjs tests it off Google's servers.
  *
  * SCOPES: drive.file + script.external_request, and NOTHING ELSE. Measured
- * 2026-10-27: with only those two, Drive REST create-with-conversion, export
- * and the PDF create all work. DocumentApp.create/openById need
+ * 2026-10-27: with only those two, Drive REST create-with-conversion and Docs
+ * documents.batchUpdate work (so did files.export, now unused). DocumentApp.create/openById need
  * .../auth/documents, and DriveApp.getFileById needs drive.readonly or drive.
  * So this file never touches DocumentApp or DriveApp, and it never uses the
  * `Drive`/`Docs` advanced-service globals either. Every Google call is REST
@@ -32,7 +37,7 @@
 
 var DRIVE_UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files' +
   '?uploadType=multipart&fields=id,webViewLink';
-var DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files/';
+var DOCS_EXPORT_URL = 'https://docs.google.com/document/d/';
 var DOCS_API_URL = 'https://docs.googleapis.com/v1/documents/';
 var GOOGLE_DOC_MIME = 'application/vnd.google-apps.document';
 var PAGE_MARGIN_PT = 43.2; // 0.6 inch
@@ -68,7 +73,7 @@ function onConfigRenderResume() {
     .addWidget(
       CardService.newTextParagraph().setText(
         'Renders a <b>jsonresume.org</b> resume into a Google Doc in your Drive, ' +
-        'plus a PDF copy. This step can only see the files it creates.'
+        'with PDF and DOCX download links. This step can only see the files it creates.'
       )
     )
     .addWidget(resumeInput)
@@ -86,10 +91,8 @@ function onConfigRenderResume() {
  * Failure policy:
  * - No resume, bad JSON, or the Doc create fails: the step FAILS (failStep).
  *   There is nothing useful to hand on.
- * - The PDF export or upload fails: the step SUCCEEDS with the Doc, and pdfFileId
- *   and pdfUrl come back EMPTY. The PDF is a by-product of a Doc that already
- *   exists, and failing the run would hide that Doc from later steps. The reason
- *   goes to the Executions log via console.error, not into a string output.
+ * - A styling call (batchUpdate) fails: the step SUCCEEDS with the Doc as
+ *   imported. The reason goes to the Executions log via console.error.
  */
 function onExecuteRenderResume(event) {
   // Log the envelope, not the payload: the résumé is personal data, and the
@@ -130,16 +133,7 @@ function onExecuteRenderResume(event) {
     console.error('RenderResume: Normal text style not applied: ' + err.message);
   }
 
-  var pdf = { id: '', webViewLink: '' };
-  try {
-    var pdfBytes = driveExportPdf(token, doc.id);
-    pdf = driveCreate(token, { name: title + '.pdf', mimeType: 'application/pdf' },
-      'application/pdf', pdfBytes);
-  } catch (err) {
-    console.error('RenderResume: Doc created, PDF skipped: ' + err.message);
-  }
-
-  return renderOutputs(buildRenderOutputs(doc.id, doc.webViewLink, pdf.id, pdf.webViewLink));
+  return renderOutputs(buildRenderOutputs(doc.id, doc.webViewLink));
 }
 
 // ---- Drive REST (Apps Script only; not reachable from the tests) ----------
@@ -147,7 +141,7 @@ function onExecuteRenderResume(event) {
 /**
  * One multipart files.create. With metadata.mimeType set to a Google Docs type
  * and an HTML body, Drive CONVERTS the upload (the import table lists
- * "HTML -> Google Docs"). With application/pdf, it stores the bytes as they are.
+ * "HTML -> Google Docs").
  */
 function driveCreate(token, metadata, mediaType, mediaBytes) {
   var boundary = 'render-resume-' + Utilities.getUuid();
@@ -174,18 +168,6 @@ function docsBatchUpdate(token, docId, requests) {
     muteHttpExceptions: true
   });
   return checkResponse(response, 'documents.batchUpdate');
-}
-
-/** Drive caps exported content at 10 MB; a résumé is nowhere near that. */
-function driveExportPdf(token, fileId) {
-  var response = UrlFetchApp.fetch(
-    DRIVE_FILES_URL + encodeURIComponent(fileId) + '/export?mimeType=application%2Fpdf', {
-      method: 'get',
-      headers: { Authorization: 'Bearer ' + token },
-      muteHttpExceptions: true
-    });
-  checkResponse(response, 'files.export');
-  return response.getContent();
 }
 
 /**
@@ -222,13 +204,27 @@ function renderOutputs(plain) {
 // ---- Pure half: tested by test-renderresume.mjs ----------------------------
 
 /** Every declared output, every time, as a plain map. */
-function buildRenderOutputs(docId, docUrl, pdfFileId, pdfUrl) {
+function buildRenderOutputs(docId, docUrl) {
   return {
     docId: str(docId),
     docUrl: str(docUrl),
-    pdfFileId: str(pdfFileId),
-    pdfUrl: str(pdfUrl)
+    pdfUrl: exportUrl(docId, 'pdf'),
+    docxUrl: exportUrl(docId, 'docx')
   };
+}
+
+/**
+ * Docs' own export link for a format. It downloads the Doc as it is when the
+ * link is opened, so it is never stale. Nothing here fetches it: it is a link
+ * for a person, so it needs no allowlist entry.
+ *
+ * A Drive file id is [A-Za-z0-9_-]. Anything else is not a Drive id, and the
+ * link is left EMPTY rather than built from it.
+ */
+function exportUrl(docId, format) {
+  var id = str(docId);
+  if (!/^[A-Za-z0-9_-]+$/.test(id)) return '';
+  return DOCS_EXPORT_URL + id + '/export?format=' + encodeURIComponent(format);
 }
 
 /**

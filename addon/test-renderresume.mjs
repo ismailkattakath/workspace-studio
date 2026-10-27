@@ -70,12 +70,12 @@ for (const el of elements) {
 // The outputs the code returns must be EXACTLY the outputs the manifest
 // declares. Studio errors the step otherwise.
 const declaredOut = render.workflowAction.outputs.map((o) => o.id).sort();
-const got = ctx.buildRenderOutputs('a', 'b', 'c', 'd');
+const got = ctx.buildRenderOutputs('a', 'b');
 check('render returns exactly the declared outputs',
   JSON.stringify(Object.keys(got).sort()) === JSON.stringify(declaredOut),
   `${JSON.stringify(Object.keys(got))} vs ${JSON.stringify(declaredOut)}`);
 check('outputs are strings even when given undefined',
-  Object.values(ctx.buildRenderOutputs(undefined, null, '', 'x')).every((v) => typeof v === 'string'));
+  Object.values(ctx.buildRenderOutputs(undefined, null)).every((v) => typeof v === 'string'));
 check('every output is a STRING scalar',
   render.workflowAction.outputs.every((o) => o.dataType.basicType === 'STRING' && o.cardinality === 'SINGLE'));
 
@@ -88,6 +88,12 @@ check('every card field matches a manifest input',
   JSON.stringify(fieldNames) === JSON.stringify(inputIds),
   `${JSON.stringify(fieldNames)} vs ${JSON.stringify(inputIds)}`);
 
+// Source with comments removed, so a word in a comment cannot fail or pass a
+// check. A line comment starts at `//` NOT preceded by `:`, so the `//` in
+// "https://" is code, not a comment. (The first version cut every line at
+// "https://", which hid a re-added export call from the check below.)
+const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+
 // The scope bill IS the design: two scopes, never documents or full drive.
 check('scopes are exactly external_request + drive.file',
   JSON.stringify([...manifest.oauthScopes].sort()) === JSON.stringify([
@@ -95,9 +101,9 @@ check('scopes are exactly external_request + drive.file',
     'https://www.googleapis.com/auth/script.external_request',
   ]));
 check('no DocumentApp or DriveApp call (each one forces a broader scope)',
-  !/\b(DocumentApp|DriveApp)\s*\./.test(renderSrc.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')));
+  !/\b(DocumentApp|DriveApp)\s*\./.test(stripComments(renderSrc)));
 check('no Drive/Docs advanced-service call (REST via UrlFetchApp only)',
-  !/\b(Drive|Docs)\.[A-Z]/.test(renderSrc.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')));
+  !/\b(Drive|Docs)\.[A-Z]/.test(stripComments(renderSrc)));
 const services = (manifest.dependencies?.enabledAdvancedServices || []).map((s) => `${s.serviceId}/${s.version}`).sort();
 check('Drive v3 + Docs v1 advanced services declared (the 403 fix)',
   JSON.stringify(services) === JSON.stringify(['docs/v1', 'drive/v3']), JSON.stringify(services));
@@ -107,8 +113,27 @@ check('Drive v3 + Docs v1 advanced services declared (the 403 fix)',
 const allow = manifest.urlFetchWhitelist || [];
 check('allowlist entries are https with a path and at most one leading *',
   allow.length > 0 && allow.every((u) => /^https:\/\/(\*\.)?[a-z0-9.-]+\.[a-z]+\/\S*$/.test(u)), JSON.stringify(allow));
-for (const url of [ctx.DRIVE_UPLOAD_URL, ctx.DRIVE_FILES_URL + 'x/export']) {
+for (const url of [ctx.DRIVE_UPLOAD_URL]) {
   check(`allowlist covers ${url.split('?')[0]}`, allow.some((p) => url.startsWith(p)));
+}
+
+// ---- the Doc is the only artifact: export LINKS, no stored PDF ----------
+const code = stripComments(renderSrc);
+check('no files.export call (nothing is exported or stored)', !/\/export\?mimeType|files\.export|driveExport/i.test(code));
+check('nothing is uploaded except the HTML import',
+  (code.match(/driveCreate\(/g) || []).length === 2 && /driveCreate\(token, \{ name: title, mimeType: GOOGLE_DOC_MIME \}/.test(code));
+check('no pdfFileId output anywhere', !/pdfFileId/.test(code) && !JSON.stringify(manifest).includes('pdfFileId'));
+const ID = '1AbC-d_9xYz';
+const links = ctx.buildRenderOutputs(ID, 'https://docs.google.com/document/d/' + ID + '/edit');
+check('pdfUrl is the Doc\'s own PDF export link',
+  links.pdfUrl === `https://docs.google.com/document/d/${ID}/export?format=pdf`, links.pdfUrl);
+check('docxUrl is the Doc\'s own DOCX export link',
+  links.docxUrl === `https://docs.google.com/document/d/${ID}/export?format=docx`, links.docxUrl);
+check('export links are URL-safe (no space, quote, angle, or extra query)',
+  [links.pdfUrl, links.docxUrl].every((u) => /^https:\/\/docs\.google\.com\/document\/d\/[A-Za-z0-9_-]+\/export\?format=[a-z]+$/.test(u)));
+for (const bad of ['', 'a/b', 'x?format=exe', 'a b', '"><script>', '../../x', undefined, null]) {
+  const o = ctx.buildRenderOutputs(bad, '');
+  check(`a non-Drive id ${JSON.stringify(bad)} yields NO export links`, o.pdfUrl === '' && o.docxUrl === '');
 }
 
 // ---- input parsing ---------------------------------------------------------

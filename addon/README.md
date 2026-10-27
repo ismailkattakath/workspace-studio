@@ -5,7 +5,7 @@ Two custom steps in one add-on:
 | Step | Does | File |
 |---|---|---|
 | **Load JSON Resume** | fetches a `resume.json` from a URL and emits it as outputs | `LoadJsonResume.gs` |
-| **Render Resume to Doc** | renders a `resume.json` string into a Google Doc, plus a PDF copy | `RenderResume.gs` |
+| **Render Resume to Doc** | renders a `resume.json` string into a Google Doc, with PDF and DOCX download links | `RenderResume.gs` |
 
 ## Load JSON Resume
 
@@ -35,9 +35,9 @@ step, so the tailoring belongs there. That split is the whole design:
         ↓
 [ask Gemini: tailor this résumé to this posting]
         ↓
-[Render Resume to Doc]  ← optional: the tailored résumé as a Doc + PDF
+[Render Resume to Doc]  ← optional: the tailored résumé as a Google Doc
         ↓
-[Gmail: create draft]   ← put docUrl / pdfUrl in the body
+[Gmail: create draft]   ← put docUrl / pdfUrl / docxUrl in the body
 ```
 
 ## Configuration
@@ -69,7 +69,11 @@ résumé: 10,605 characters over 123 lines.
 
 Takes a résumé as JSON text, usually Load JSON Resume's `resume` output or an AI step's tailored
 rewrite of it. It renders the résumé to a single-column HTML document. Google converts that into
-a **Google Doc** in your Drive, then the step exports the Doc to a **PDF** saved beside it.
+a **Google Doc** in your Drive. **The Doc is the only file the step creates.**
+
+PDF and DOCX come from Docs' own export links, built from the Doc's id. A link downloads the Doc
+**as it is when you open it**, so a hand edit to the Doc is never out of step with a stored copy.
+The step fetches nothing to build them.
 
 | Input | Required | Notes |
 |---|---|---|
@@ -80,8 +84,11 @@ a **Google Doc** in your Drive, then the step exports the Doc to a **PDF** saved
 |---|---|---|
 | `docId` | STRING | Drive file ID of the Doc |
 | `docUrl` | STRING | link to the Doc, for a Gmail or Chat step |
-| `pdfFileId` | STRING | Drive file ID of the PDF. **Empty if the export failed** |
-| `pdfUrl` | STRING | link to the PDF. **Empty if the export failed** |
+| `pdfUrl` | STRING | `https://docs.google.com/document/d/{id}/export?format=pdf` |
+| `docxUrl` | STRING | `https://docs.google.com/document/d/{id}/export?format=docx` |
+
+The export links open for anyone who can open the Doc, i.e. the owner by default. Share the Doc
+to share them.
 
 A Studio step cannot output a file: output types are scalars only. So the step returns file IDs
 and links, which is the same pattern Google's own Drive picker uses.
@@ -89,9 +96,8 @@ and links, which is the same pattern Google's own Drive picker uses.
 **Failure policy:**
 
 - No résumé, bad JSON, or a failed Doc create → the step **fails**, with the reason in Activity.
-- A failed PDF export → the step **succeeds** with the Doc, and the two `pdf*` outputs are
-  empty. The reason goes to the Executions log. The Doc already exists, and failing the run
-  would hide it from later steps.
+- A failed styling call (`documents.batchUpdate`) → the step **succeeds** with the Doc as
+  imported. The reason goes to the Executions log.
 
 **Sections rendered**, in order, each skipped when absent or empty: basics (name, label,
 contact, profiles, summary), work, projects, education, skills, certificates, awards,
@@ -118,8 +124,8 @@ create itself.
 |---|---|
 | Drive REST `files.create`, HTML → Google Doc (multipart upload) | **works** |
 | Docs API `documents.batchUpdate` on that Doc | **works** (the step sets page margins with it) |
-| Drive REST `files/{id}/export?mimeType=application/pdf` | **works** |
-| Drive REST `files.create` of the PDF bytes | **works** |
+| Drive REST `files/{id}/export?mimeType=application/pdf` | **works** (no longer called; see below) |
+| Drive REST `files.create` of the PDF bytes | **works** (no longer called) |
 | `DocumentApp.create` / `openById` | **fails**: needs `auth/documents` |
 | `DriveApp.getFileById` | **fails**: needs `drive.readonly` or `drive` |
 

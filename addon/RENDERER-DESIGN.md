@@ -104,17 +104,32 @@ asks for — and `toPlainText()` already proves the serialiser shape is small an
 tailored résumé string
       ↓  resumeToHtml()                    ← the only real code we own
       ↓  Drive multipart upload (text/html), mimeType application/vnd.google-apps.document
-      ↓  GET /drive/v3/files/{id}/export?mimeType=application/pdf
-      ↓  Drive multipart upload of the PDF bytes
-outputs: docId · docUrl · pdfFileId · pdfUrl   (all STRING, cardinality SINGLE)
+      ↓  documents.batchUpdate: page margins, Normal text style (best-effort)
+outputs: docId · docUrl · pdfUrl · docxUrl   (all STRING, cardinality SINGLE)
+         pdfUrl/docxUrl = https://docs.google.com/document/d/{id}/export?format=pdf|docx
 ```
+
+**The Doc is the single artifact (2026-10-27, operator's decision).** The first build also
+exported a PDF and stored it beside the Doc. That was removed:
+
+- **One source of truth.** A stored PDF goes stale the moment the Doc is edited.
+- **The Doc can be hand-tuned** without touching the JSON, and every export reflects the edit.
+- **Docs' own export** covers PDF, DOCX and more, always current. The links are built from the
+  id, not fetched, so they need no API call, no allowlist entry and no failure handling.
+- **Less code:** the export call, the PDF upload and the best-effort PDF policy are gone.
+
+**Deferred, not rejected: a "Save a PDF copy" option.** Bring it back when a real need appears
+for an attachment or a frozen snapshot (e.g. "the version I sent on this date"). The path is
+measured: **`drive.file` alone covers `files.export`** of a Doc the add-on created, and the
+`files.create` of the PDF bytes (2026-10-27). The removed code is in commit `4329954`
+(`driveExportPdf`).
 
 **Changed from the first draft of this design:**
 
 | Was | Now | Why |
 |---|---|---|
 | `toMarkdown()`, uploaded as `text/markdown` | `resumeToHtml()`, uploaded as `text/html` | HTML was this doc's own fallback (question 1). It is the measured path, and HTML can carry links, bold and lists without depending on Markdown dialect support |
-| PDF always, failure undefined | PDF is **best-effort**: an export failure keeps the Doc, returns empty `pdf*` outputs, and logs the reason | the Doc already exists. Failing the run would hide it from later steps |
+| PDF always, failure undefined | **no stored PDF**: `pdfUrl` and `docxUrl` are Docs export links | see "The Doc is the single artifact" above. (Between 7e8548e and 4329954 the PDF was stored, best-effort.) |
 | no allowlist | `urlFetchWhitelist` added | a **versioned** deployment requires it. It cannot say "any host", and a declared list is enforced, so it also narrows Load JSON Resume to the listed résumé hosts |
 | (unspecified) | `documents.batchUpdate` sets **page margins** only (0.6 in), best-effort | the first live render ran 6 pages. heading and body sizes are inline styles on each element. `updateNamedStyle` exists and is the fallback, but inline styles are testable offline and add no API call |
 | (unspecified) | the résumé is treated as **untrusted**: every value escaped, `href` only for `http(s)` without credentials, `basics.image` dropped | the input often comes from an AI step that read an inbox |
@@ -156,9 +171,12 @@ targets Node and cannot run in Apps Script — no npm, no filesystem.
    still to be confirmed by a re-run.
 2. ~~Does `drive.file` alone authorise both the create AND the `/export`?~~ **ANSWERED
    2026-10-27: yes.** Create, export and the PDF create all work with `drive.file` alone.
+   The step no longer exports (the Doc is the single artifact); the fact is kept for a
+   future "Save a PDF copy" option.
 5. **Is a declared `urlFetchWhitelist` enforced on a TEST deployment?** The reference says
    only that the field is optional there. Assume yes: the résumé URL's host must be listed.
 3. **Can Gmail's native "Send a message" step attach a Drive file**, or only interpolate
-   `pdfUrl` into the body? The indexed corpus is the developer docs only and contains no
+   `pdfUrl` into the body? (If it can attach, that is the "real attachment need" that would
+   bring back a stored PDF.) The indexed corpus is the developer docs only and contains no
    catalogue of native steps. Plan for a link; treat attachment as a bonus.
 4. **Drive conversion quota** — Google publishes no conversion row on its quotas page.
