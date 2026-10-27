@@ -1,6 +1,7 @@
 # Design: "Render Resume to Doc" — the companion step
 
-**Status: BUILT (2026-10-27), not yet run live.** The code is `RenderResume.gs`; the tests are
+**Status: BUILT and RUN LIVE (2026-10-27).** Live-run findings and fixes: README § The
+renderer. The code is `RenderResume.gs`; the tests are
 `test-renderresume.mjs`. The blocker cleared first: `Load JSON Resume` ran on Google's servers on
 2026-09-30 (`onExecute`, 0.91 s, Completed), and its real event payload is pinned in
 `test-loadjsonresume.mjs`.
@@ -115,7 +116,7 @@ outputs: docId · docUrl · pdfFileId · pdfUrl   (all STRING, cardinality SINGL
 | `toMarkdown()`, uploaded as `text/markdown` | `resumeToHtml()`, uploaded as `text/html` | HTML was this doc's own fallback (question 1). It is the measured path, and HTML can carry links, bold and lists without depending on Markdown dialect support |
 | PDF always, failure undefined | PDF is **best-effort**: an export failure keeps the Doc, returns empty `pdf*` outputs, and logs the reason | the Doc already exists. Failing the run would hide it from later steps |
 | no allowlist | `urlFetchWhitelist` added | a **versioned** deployment requires it. It cannot say "any host", and a declared list is enforced, so it also narrows Load JSON Resume to the listed résumé hosts |
-| (unspecified) | `documents.batchUpdate` **not used** | measured to work, but nothing in the render needs it yet. Margins or fonts could use it later |
+| (unspecified) | `documents.batchUpdate` sets **page margins** only (0.6 in), best-effort | the first live render ran 6 pages. batchUpdate cannot edit named styles, so heading and body sizes are inline styles on each element instead |
 | (unspecified) | the résumé is treated as **untrusted**: every value escaped, `href` only for `http(s)` without credentials, `basics.image` dropped | the input often comes from an AI step that read an inbox |
 
 Manifest adds exactly one scope:
@@ -150,9 +151,9 @@ targets Node and cannot run in Apps Script — no npm, no filesystem.
 
 ## Verify these on first install — none are knowable from here
 
-1. **HTML→Doc fidelity**: headings, bullets, bold, links. The upload is now `text/html`
-   (it was `text/markdown` in the first draft). Still unverified on a real résumé: check the
-   first rendered Doc by eye.
+1. ~~HTML→Doc fidelity~~ **ANSWERED 2026-10-27:** headings, real lists, live links and
+   escaping all survive the import. Length did not (6 pages); fixed with inline styles, and
+   still to be confirmed by a re-run.
 2. ~~Does `drive.file` alone authorise both the create AND the `/export`?~~ **ANSWERED
    2026-10-27: yes.** Create, export and the PDF create all work with `drive.file` alone.
 5. **Is a declared `urlFetchWhitelist` enforced on a TEST deployment?** The reference says

@@ -33,7 +33,9 @@
 var DRIVE_UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files' +
   '?uploadType=multipart&fields=id,webViewLink';
 var DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files/';
+var DOCS_API_URL = 'https://docs.googleapis.com/v1/documents/';
 var GOOGLE_DOC_MIME = 'application/vnd.google-apps.document';
+var PAGE_MARGIN_PT = 43.2; // 0.6 inch
 
 /**
  * Configuration card: the resume JSON, plus an optional title.
@@ -59,7 +61,7 @@ function onConfigRenderResume() {
   var titleInput = CardService.newTextInput()
     .setFieldName('title')
     .setTitle('Document title (optional)')
-    .setHint('Defaults to "<your name> — Résumé".')
+    .setHint('Defaults to "{your name} — Résumé".')
     .setHostAppDataSource(variables());
 
   var section = CardService.newCardSection()
@@ -111,6 +113,16 @@ function onExecuteRenderResume(event) {
     return failStep('Could not create the Google Doc: ' + err.message);
   }
 
+  // Page margins. How the HTML import treats CSS @page is undocumented, so
+  // set them explicitly through the
+  // Docs API (documents.batchUpdate, measured to work under drive.file on
+  // 2026-10-27). Cosmetic, so a failure is logged and the run goes on.
+  try {
+    docsBatchUpdate(token, doc.id, marginRequests(PAGE_MARGIN_PT));
+  } catch (err) {
+    console.error('RenderResume: margins not applied: ' + err.message);
+  }
+
   var pdf = { id: '', webViewLink: '' };
   try {
     var pdfBytes = driveExportPdf(token, doc.id);
@@ -143,6 +155,18 @@ function driveCreate(token, metadata, mediaType, mediaBytes) {
   });
   var file = JSON.parse(checkResponse(response, 'files.create'));
   return { id: str(file.id), webViewLink: str(file.webViewLink) };
+}
+
+/** documents.batchUpdate: Docs REST v1, same token, same no-DocumentApp rule. */
+function docsBatchUpdate(token, docId, requests) {
+  var response = UrlFetchApp.fetch(DOCS_API_URL + encodeURIComponent(docId) + ':batchUpdate', {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify({ requests: requests }),
+    headers: { Authorization: 'Bearer ' + token },
+    muteHttpExceptions: true
+  });
+  return checkResponse(response, 'documents.batchUpdate');
 }
 
 /** Drive caps exported content at 10 MB; a résumé is nowhere near that. */
@@ -296,12 +320,34 @@ function objs(v) {
   return arr(v).filter(function (x) { return typeof x === 'object' && !Array.isArray(x); });
 }
 
+var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * ISO 8601 (the schema's date format) to the form résumé themes print:
+ * "2024" stays "2024", "2024-08" and "2024-08-01" become "Aug 2024". The day
+ * is dropped, as themes do. Anything else ("Summer 2019", a bad month) comes
+ * back as it was, trimmed: a wrong guess is worse than the raw string.
+ */
+function formatDate(v) {
+  var s = str(v).trim();
+  var m = /^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?$/.exec(s);
+  if (!m) return s;
+  if (!m[2]) return m[1];
+  var month = parseInt(m[2], 10);
+  if (month < 1 || month > 12) return s;
+  if (m[3]) {
+    var day = parseInt(m[3], 10);
+    if (day < 1 || day > 31) return s;
+  }
+  return MONTHS[month - 1] + ' ' + m[1];
+}
+
 function dateRange(start, end) {
-  var s = str(start).trim();
-  var e = str(end).trim();
+  var s = formatDate(start);
+  var e = formatDate(end);
   if (!s && !e) return '';
   if (!s) return e;
-  return s + ' – ' + (e || 'present');
+  return s + ' – ' + (e || 'Present');
 }
 
 function joinNonEmpty(parts, sep) {
@@ -310,25 +356,75 @@ function joinNonEmpty(parts, sep) {
 }
 
 /**
- * One entry: a headline (bold left part, dates on the right), an optional
- * subline, a summary paragraph, a bullet list, and a keyword line. Every
- * section reduces to this shape. Each section's own mapping lives in
- * RESUME_SECTIONS, because the field names genuinely differ per section.
+ * Inline styles, ON EVERY ELEMENT. The live run (2026-10-27) came out at 6
+ * pages: the import maps h1/h2/h3 to the Doc's named Heading styles (H1 at
+ * Arial 24) and did not carry the body's font-size down to them. An inline
+ * style on the element itself is the one place the import reads per
+ * paragraph. The Docs API cannot fix this either: batchUpdate has no request
+ * that edits a named style, only text and paragraph ranges.
+ */
+var FONT = 'font-family:Arial,sans-serif;line-height:1.15;';
+var STYLES = {
+  h1: FONT + 'font-size:18pt;font-weight:bold;margin:0 0 2pt 0',
+  label: FONT + 'font-size:11pt;font-weight:bold;margin:0 0 2pt 0',
+  h2: FONT + 'font-size:12pt;font-weight:bold;margin:10pt 0 3pt 0',
+  h3: FONT + 'font-size:10.5pt;font-weight:bold;margin:6pt 0 0 0',
+  meta: FONT + 'font-size:9.5pt;color:#555555;margin:0 0 2pt 0',
+  p: FONT + 'font-size:10pt;margin:0 0 3pt 0',
+  ul: 'margin:0 0 3pt 0',
+  li: FONT + 'font-size:10pt;margin:0'
+};
+
+/** One element with its inline style. `inner` is already-escaped HTML. */
+function el(tag, styleKey, inner) {
+  return '<' + tag + ' style="' + STYLES[styleKey] + '">' + inner + '</' + tag + '>';
+}
+
+/** The Docs API requests that set all four page margins, in points. */
+function marginRequests(pt) {
+  var m = { magnitude: pt, unit: 'PT' };
+  return [{
+    updateDocumentStyle: {
+      documentStyle: { marginTop: m, marginBottom: m, marginLeft: m, marginRight: m },
+      fields: 'marginTop,marginBottom,marginLeft,marginRight'
+    }
+  }];
+}
+
+/**
+ * One entry: the title as an h3, then ONE small grey line with the dates and
+ * any subline ("Aug 2024 – Mar 2026 · Toronto"), then summary, bullets and
+ * keywords.
+ *
+ * Dates are NOT in the h3. Inside it, a long title pushed "– 2026-03-01" onto
+ * a line of its own (live run, 2026-10-27). A right-aligned tab stop would
+ * need a Docs API range edit after import, and a two-cell table imports with
+ * borders and confuses ATS parsers. A separate line is the one layout the
+ * HTML import is certain to keep.
  */
 function renderEntry(e) {
-  var html = '';
-  var head = '<b>' + e.title + '</b>';
-  if (e.dates) head += ' <span style="color:#555555">· ' + escapeHtml(e.dates) + '</span>';
-  html += '<h3>' + head + '</h3>';
-  if (e.subtitle) html += '<p><i>' + e.subtitle + '</i></p>';
-  if (str(e.summary).trim()) html += '<p>' + escapeHtml(e.summary) + '</p>';
+  var html = el('h3', 'h3', e.title);
+  var meta = [e.dates ? escapeHtml(e.dates) : '', e.subtitle || ''].filter(function (x) { return x; });
+  if (meta.length) html += el('p', 'meta', meta.join(' · '));
+  if (str(e.summary).trim()) html += el('p', 'p', escapeHtml(e.summary));
   var bullets = arr(e.bullets).map(str).filter(function (b) { return b.trim(); });
   if (bullets.length) {
-    html += '<ul>' + bullets.map(function (b) { return '<li>' + escapeHtml(b) + '</li>'; }).join('') + '</ul>';
+    html += el('ul', 'ul', bullets.map(function (b) { return el('li', 'li', escapeHtml(b)); }).join(''));
   }
   var keywords = arr(e.keywords).map(str).filter(function (k) { return k.trim(); });
-  if (keywords.length) html += '<p>' + escapeHtml(keywords.join(', ')) + '</p>';
+  if (keywords.length) html += el('p', 'p', escapeHtml(keywords.join(', ')));
   return html;
+}
+
+/**
+ * A compact entry: ONE paragraph, "Title: keyword, keyword". Used for skills,
+ * languages and interests, which carry no dates or bullets. As an h3 plus a
+ * keyword paragraph, the live résumé's skills section spent two lines and a
+ * heading gap on every group.
+ */
+function renderCompactEntry(e) {
+  var keywords = arr(e.keywords).map(str).filter(function (k) { return k.trim(); });
+  return el('p', 'p', '<b>' + e.title + '</b>' + (keywords.length ? ': ' + escapeHtml(keywords.join(', ')) : ''));
 }
 
 /**
@@ -346,35 +442,37 @@ var RESUME_SECTIONS = [
     };
   } },
   { key: 'projects', heading: 'Projects', entry: function (p) {
+    // p.type is a free-form category ("application", "volunteering"). Printed
+    // raw it read as an enum, so it is left out.
     return {
       title: joinNonEmpty([linkOrText(p.url, p.name), escapeHtml(p.entity)], ' — '),
       dates: dateRange(p.startDate, p.endDate),
-      subtitle: escapeHtml(joinNonEmpty([arr(p.roles).join(', '), p.type], ' · ')),
+      subtitle: escapeHtml(arr(p.roles).map(str).join(', ')),
       summary: p.description || p.summary, bullets: p.highlights, keywords: p.keywords
     };
   } },
   { key: 'education', heading: 'Education', entry: function (ed) {
     return {
-      title: joinNonEmpty([escapeHtml(joinNonEmpty([ed.studyType, ed.area], ' ')),
+      title: joinNonEmpty([escapeHtml(joinNonEmpty([ed.studyType, ed.area], ', ')),
         linkOrText(ed.url, ed.institution)], ' — '),
       dates: dateRange(ed.startDate, ed.endDate),
       subtitle: escapeHtml(ed.score ? 'Score: ' + str(ed.score) : ''),
       summary: '', bullets: ed.courses
     };
   } },
-  { key: 'skills', heading: 'Skills', entry: function (s) {
+  { key: 'skills', heading: 'Skills', compact: true, entry: function (s) {
     return { title: escapeHtml(joinNonEmpty([s.name, s.level], ' — ')), keywords: s.keywords };
   } },
   { key: 'certificates', heading: 'Certifications', entry: function (c) {
-    return { title: joinNonEmpty([linkOrText(c.url, c.name), escapeHtml(c.issuer)], ' — '), dates: str(c.date) };
+    return { title: joinNonEmpty([linkOrText(c.url, c.name), escapeHtml(c.issuer)], ' — '), dates: formatDate(c.date) };
   } },
   { key: 'awards', heading: 'Awards', entry: function (a) {
-    return { title: escapeHtml(joinNonEmpty([a.title, a.awarder], ' — ')), dates: str(a.date), summary: a.summary };
+    return { title: escapeHtml(joinNonEmpty([a.title, a.awarder], ' — ')), dates: formatDate(a.date), summary: a.summary };
   } },
   { key: 'publications', heading: 'Publications', entry: function (p) {
     return {
       title: joinNonEmpty([linkOrText(p.url, p.name), escapeHtml(p.publisher)], ' — '),
-      dates: str(p.releaseDate), summary: p.summary
+      dates: formatDate(p.releaseDate), summary: p.summary
     };
   } },
   { key: 'volunteer', heading: 'Volunteering', entry: function (v) {
@@ -383,10 +481,10 @@ var RESUME_SECTIONS = [
       dates: dateRange(v.startDate, v.endDate), summary: v.summary, bullets: v.highlights
     };
   } },
-  { key: 'languages', heading: 'Languages', entry: function (l) {
+  { key: 'languages', heading: 'Languages', compact: true, entry: function (l) {
     return { title: escapeHtml(joinNonEmpty([l.language, l.fluency], ' — ')) };
   } },
-  { key: 'interests', heading: 'Interests', entry: function (i) {
+  { key: 'interests', heading: 'Interests', compact: true, entry: function (i) {
     return { title: escapeHtml(i.name), keywords: i.keywords };
   } },
   { key: 'references', heading: 'References', entry: function (r) {
@@ -408,8 +506,8 @@ function resumeToHtml(resume) {
   var b = (r.basics && typeof r.basics === 'object' && !Array.isArray(r.basics)) ? r.basics : {};
   var out = [];
 
-  if (str(b.name).trim()) out.push('<h1>' + escapeHtml(b.name) + '</h1>');
-  if (str(b.label).trim()) out.push('<p><b>' + escapeHtml(b.label) + '</b></p>');
+  if (str(b.name).trim()) out.push(el('h1', 'h1', escapeHtml(b.name)));
+  if (str(b.label).trim()) out.push(el('p', 'label', escapeHtml(b.label)));
 
   var loc = (b.location && typeof b.location === 'object') ? b.location : {};
   var email = safeEmail(b.email);
@@ -424,11 +522,11 @@ function resumeToHtml(resume) {
     contact.push(str(p.url).trim() ? linkOrText(p.url, label || p.url) : escapeHtml(label));
   });
   contact = contact.filter(function (c) { return c; });
-  if (contact.length) out.push('<p>' + contact.join(' · ') + '</p>');
+  if (contact.length) out.push(el('p', 'meta', contact.join(' · ')));
 
   if (str(b.summary).trim()) {
-    out.push('<h2>Summary</h2>');
-    out.push('<p>' + escapeHtml(b.summary) + '</p>');
+    out.push(el('h2', 'h2', 'Summary'));
+    out.push(el('p', 'p', escapeHtml(b.summary)));
   }
 
   RESUME_SECTIONS.forEach(function (section) {
@@ -436,15 +534,16 @@ function resumeToHtml(resume) {
     if (!items.length) return;
     var body = items.map(function (item) {
       var e = section.entry(item);
-      return e.title ? renderEntry(e) : '';
+      if (!e.title) return '';
+      return section.compact ? renderCompactEntry(e) : renderEntry(e);
     }).join('');
     if (!body) return;
-    out.push('<h2>' + section.heading + '</h2>');
+    out.push(el('h2', 'h2', section.heading));
     out.push(body);
   });
 
   return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' +
     escapeHtml(docTitleFor(r, '')) + '</title></head>' +
-    '<body style="font-family:Arial,sans-serif;font-size:10.5pt;line-height:1.3">' +
+    '<body style="' + FONT + 'font-size:10pt">' +
     out.join('\n') + '</body></html>';
 }

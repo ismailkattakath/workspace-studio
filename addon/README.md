@@ -11,7 +11,8 @@ Two custom steps in one add-on:
 
 Fetches a `resume.json` in the [jsonresume.org](https://jsonresume.org) standard from a URL you
 configure, and hands it to the rest of your flow. Point it at your résumé and it works — the
-registry, a GitHub or GitLab raw file, or any HTTPS URL serving the schema.
+registry, a GitHub raw file or gist, or a GitLab raw file (the hosts in the manifest's
+allowlist, § Deploying it).
 
 ## What it does, and what it deliberately doesn't
 
@@ -45,9 +46,10 @@ One field, on the step's configuration card:
 
 | Field | Example |
 |---|---|
-| **Your JSON Resume URL** | `https://registry.jsonresume.org/<username>.json` |
-| | `https://raw.githubusercontent.com/<user>/<repo>/main/resume.json` |
-| | any HTTPS URL serving the jsonresume.org schema |
+| **Your JSON Resume URL** | `https://registry.jsonresume.org/{username}.json` |
+| | `https://raw.githubusercontent.com/{user}/{repo}/main/resume.json` |
+| | `https://gist.githubusercontent.com/{user}/{id}/raw/resume.json` |
+| | `https://gitlab.com/{user}/{repo}/-/raw/main/resume.json` |
 
 ## Outputs
 
@@ -115,7 +117,7 @@ create itself.
 | Call | Result |
 |---|---|
 | Drive REST `files.create`, HTML → Google Doc (multipart upload) | **works** |
-| Docs API `documents.batchUpdate` on that Doc | **works** (the step does not use it) |
+| Docs API `documents.batchUpdate` on that Doc | **works** (the step sets page margins with it) |
 | Drive REST `files/{id}/export?mimeType=application/pdf` | **works** |
 | Drive REST `files.create` of the PDF bytes | **works** |
 | `DocumentApp.create` / `openById` | **fails**: needs `auth/documents` |
@@ -194,7 +196,7 @@ about the platform. **A test that agrees with the code about the wrong thing is 
 test.** They now assert the `actionInvocation` payload and carry two regression guards: the old
 `formInputs` shape must be *rejected*, and an integer input must not masquerade as a string.
 
-## The renderer: built, not yet run live
+## The renderer: built, and run live
 
 [`RENDERER-DESIGN.md`](RENDERER-DESIGN.md) is the design for **Render Resume to Doc**, which is
 now **built** (`RenderResume.gs`). It waited until Load JSON Resume had run for real, and that
@@ -202,8 +204,37 @@ happened on 2026-09-30. The design also records two dead ends, verified by runni
 JSON Resume registry's `.pdf` endpoint is broken in production, and the registry is
 username-keyed, so it can never render a *tailored* résumé.
 
-**Not yet done:** a live run of the renderer in a flow. The scope calls it relies on were
-measured on 2026-10-27 (§ Scopes), but the step itself has not run on Google's servers.
+**Ran live on 2026-10-27:** the flow reported *Run Completed* and produced a Doc plus a PDF.
+The structure was faithful: H1/H2/H3 headings, real lists, live links, correct escaping. Eight
+findings came back and are fixed:
+
+| # | Finding | Fix | Test |
+|---|---|---|---|
+| 1 | **6 pages** (last nearly empty) for a 19 KB résumé | inline `font-size` + `margin` on **every** h1/h2/h3/p/li (h1 18pt, h2 12pt, h3 10.5pt, body 10pt); 0.6 in page margins via `documents.batchUpdate` (best-effort); skills, languages and interests as one line each | every block carries a size; h1 ≤ 20pt; h1 > h2 > h3; margin request shape |
+| 2 | Dates inside the h3 wrapped, orphaning `– 2026-03-01` | dates moved to **one small grey line under the h3**, with location/roles: `Aug 2024 – Mar 2026 · Toronto` | no h3 contains a year; the meta line follows the h3 |
+| 3 | Raw ISO dates, lowercase `present` | `formatDate()`: `YYYY` stays, `YYYY-MM` / `YYYY-MM-DD` → `Aug 2024`; anything else untouched; `Present` | 12 input cases, ranges |
+| 4 | `Bachelor of Technology (BTech) Computer Science…` | studyType and area joined with `, ` | |
+| 5 | Project subline ended `· application` (raw `type`) | `type` dropped; roles kept | |
+| 6 | `<username>`, `<user>`, `<repo>`, `<basics.name>` vanished from card hints | `{username}`-style placeholders | both cards are built through a CardService stub; no hint or title contains `<` |
+| 7 | Load hint still promised "any HTTPS URL" | hint lists the allowlisted hosts | hint hosts == allowlisted résumé hosts |
+| 8 | Variable chips read "Step 2: The raw resume.json document, as a JSON string." | short descriptions: `Resume (JSON)`, `Doc URL`, `PDF URL`, … | output descriptions ≤ 24 chars, no sentence |
+
+**Why #1 is fixed with inline styles, not the Docs API alone:** the import maps h1–h3 to the
+Doc's named Heading styles (H1 at Arial 24) and did not carry the body's font-size down to them.
+`documents.batchUpdate` has no request that edits a named style, only text and paragraph ranges,
+so it cannot fix heading sizes globally. An inline style on each element is the one place the
+import reads per paragraph. It is still a **hypothesis until the next live run** shows the page
+count.
+
+**Why #2 uses a separate line, not a right-aligned tab:** a tab stop needs a Docs API range edit
+after import, and a two-cell table imports with borders and confuses ATS parsers. A paragraph is
+the one layout the HTML import is certain to keep.
+
+**Also found:** `registry.jsonresume.org/{user}.json` now answers **301 → `jsonresume.org/@{user}.json`**
+(measured 2026-10-27). `UrlFetchApp` follows redirects, so `https://jsonresume.org/` joined the
+allowlist.
+
+**Next:** a re-run on the operator's word, to confirm the page count (target 2–3).
 
 ## Deploying it — the honest path
 
@@ -236,7 +267,8 @@ leading `*` for subdomains. **There is no "any host" entry.** Once declared, the
 enforced: *"script projects can't access URLs that have not been added to the allowlist"*. The
 page does not exempt test deployments, so assume it applies to them too (unverified). **Load
 JSON Resume can therefore fetch only from the listed hosts:** `registry.jsonresume.org`,
-`raw.githubusercontent.com`, `gist.githubusercontent.com` and `gitlab.com`. To serve a résumé
+`jsonresume.org` (the registry's redirect target), `raw.githubusercontent.com`,
+`gist.githubusercontent.com` and `gitlab.com`. To serve a résumé
 from anywhere else, add its host to the manifest. This narrows the "any HTTPS URL" promise above.
 
 **Use the web editor for the first run, not `clasp`.** `clasp` is in nixpkgs as

@@ -24,6 +24,7 @@
     "https://www.googleapis.com/",
     "https://docs.googleapis.com/",
     "https://registry.jsonresume.org/",
+    "https://jsonresume.org/",
     "https://raw.githubusercontent.com/",
     "https://gist.githubusercontent.com/",
     "https://gitlab.com/"
@@ -39,12 +40,12 @@
           "id": "loadJsonResume",
           "state": "ACTIVE",
           "name": "Load JSON Resume",
-          "description": "Fetches a resume.json in the jsonresume.org standard from any HTTPS URL - the JSON Resume registry, a GitHub or GitLab raw file, or your own host - and emits it as structured outputs for later steps to use.",
+          "description": "Fetches a resume.json in the jsonresume.org standard from the JSON Resume registry, a GitHub raw file or gist, or a GitLab raw file, and emits it as outputs for later steps.",
           "workflowAction": {
             "inputs": [
               {
                 "id": "resumeUrl",
-                "description": "URL of your resume.json in the jsonresume.org standard. The registry (https://registry.jsonresume.org/<username>.json), a GitHub/GitLab raw file, or any HTTPS URL serving the schema.",
+                "description": "Resume URL",
                 "cardinality": "SINGLE",
                 "required": true,
                 "dataType": {
@@ -55,7 +56,7 @@
             "outputs": [
               {
                 "id": "resume",
-                "description": "The raw resume.json document, as a JSON string.",
+                "description": "Resume (JSON)",
                 "cardinality": "SINGLE",
                 "dataType": {
                   "basicType": "STRING"
@@ -63,7 +64,7 @@
               },
               {
                 "id": "resumeText",
-                "description": "The resume flattened to plain text, ready to pass to an AI step as context.",
+                "description": "Resume (plain text)",
                 "cardinality": "SINGLE",
                 "dataType": {
                   "basicType": "STRING"
@@ -71,7 +72,7 @@
               },
               {
                 "id": "name",
-                "description": "basics.name from the resume, for addressing replies.",
+                "description": "Name",
                 "cardinality": "SINGLE",
                 "dataType": {
                   "basicType": "STRING"
@@ -79,7 +80,7 @@
               },
               {
                 "id": "label",
-                "description": "basics.label - the headline, e.g. \"Principal Software Engineer\".",
+                "description": "Headline",
                 "cardinality": "SINGLE",
                 "dataType": {
                   "basicType": "STRING"
@@ -87,7 +88,7 @@
               },
               {
                 "id": "email",
-                "description": "basics.email from the resume.",
+                "description": "Email",
                 "cardinality": "SINGLE",
                 "dataType": {
                   "basicType": "STRING"
@@ -107,7 +108,7 @@
             "inputs": [
               {
                 "id": "resume",
-                "description": "The resume as JSON text in the jsonresume.org standard - typically the \"resume\" output of Load JSON Resume.",
+                "description": "Resume (JSON)",
                 "cardinality": "SINGLE",
                 "required": true,
                 "dataType": {
@@ -116,7 +117,7 @@
               },
               {
                 "id": "title",
-                "description": "Optional document title. Defaults to \"<name> - Resume\".",
+                "description": "Document title",
                 "cardinality": "SINGLE",
                 "required": false,
                 "dataType": {
@@ -127,7 +128,7 @@
             "outputs": [
               {
                 "id": "docId",
-                "description": "Drive file ID of the new Google Doc.",
+                "description": "Doc file ID",
                 "cardinality": "SINGLE",
                 "dataType": {
                   "basicType": "STRING"
@@ -135,7 +136,7 @@
               },
               {
                 "id": "docUrl",
-                "description": "Link to the new Google Doc.",
+                "description": "Doc URL",
                 "cardinality": "SINGLE",
                 "dataType": {
                   "basicType": "STRING"
@@ -143,7 +144,7 @@
               },
               {
                 "id": "pdfFileId",
-                "description": "Drive file ID of the PDF copy. Empty if the PDF export failed; the Doc still exists.",
+                "description": "PDF file ID",
                 "cardinality": "SINGLE",
                 "dataType": {
                   "basicType": "STRING"
@@ -151,7 +152,7 @@
               },
               {
                 "id": "pdfUrl",
-                "description": "Link to the PDF copy. Empty if the PDF export failed.",
+                "description": "PDF URL",
                 "cardinality": "SINGLE",
                 "dataType": {
                   "basicType": "STRING"

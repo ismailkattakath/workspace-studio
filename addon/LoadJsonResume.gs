@@ -49,10 +49,15 @@ function onConfigLoadJsonResume() {
     .setFieldName('resumeUrl') // MUST equal the manifest inputs[].id — that binding is
                                // what delivers the value to onExecuteFunction.
     .setTitle('Your JSON Resume URL')
+    // {curly} placeholders, never <angle> ones: Studio renders hint text as
+    // HTML and swallowed <username> whole (live run, 2026-10-27). The hosts
+    // listed must match urlFetchWhitelist in appsscript.json; the test checks.
     .setHint(
-      'https://registry.jsonresume.org/<username>.json  ·  ' +
-      'https://raw.githubusercontent.com/<user>/<repo>/main/resume.json  ·  ' +
-      'or any HTTPS URL serving the jsonresume.org schema'
+      'HTTPS on one of these hosts: ' +
+      'https://registry.jsonresume.org/{username}.json (or https://jsonresume.org/@{username}.json)  ·  ' +
+      'https://raw.githubusercontent.com/{user}/{repo}/main/resume.json  ·  ' +
+      'https://gist.githubusercontent.com/{user}/{id}/raw/resume.json  ·  ' +
+      'https://gitlab.com/{user}/{repo}/-/raw/main/resume.json'
     )
     // Lets the user pipe a variable from an EARLIER step into this field instead
     // of typing a literal URL — e.g. a URL an upstream step looked up. Every

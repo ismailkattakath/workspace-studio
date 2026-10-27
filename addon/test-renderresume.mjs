@@ -23,7 +23,13 @@ const read = (f) => readFileSync(join(here, f), 'utf8');
 // loads a project: one shared global scope. RenderResume.gs reuses str(),
 // readActionInput(), failStep(), hasAnyKnownSection() and MAX_BYTES from
 // LoadJsonResume.gs, so loading it alone would hide a missing dependency.
-const ctx = createContext({ console });
+// CardService is a recording stub: every call returns the stub and is
+// logged, so the config cards can be BUILT here and their hint text read.
+const cardCalls = [];
+const cardStub = new Proxy(function () {}, {
+  get: (_t, k) => (k === 'then' ? undefined : (...args) => { cardCalls.push([k, args]); return cardStub; }),
+});
+const ctx = createContext({ console, CardService: cardStub });
 let loadGlobals = [];
 for (const f of ['LoadJsonResume.gs', 'RenderResume.gs']) {
   if (f === 'RenderResume.gs') loadGlobals = Object.keys(ctx);
@@ -170,19 +176,100 @@ const full = {
   projects: [{ name: 'Notes', description: 'Translation with notes.', url: 'https://notes.example' }],
 };
 const f = ctx.resumeToHtml(full);
-check('name is the h1', f.includes('<h1>Ada Lovelace</h1>'));
+const h2 = (html, heading) => new RegExp(`<h2 style="[^"]*">${heading}</h2>`).test(html);
+check('name is the h1', /<h1 style="[^"]*">Ada Lovelace<\/h1>/.test(f));
 check('email becomes a mailto link', f.includes('<a href="mailto:ada@example.com">ada@example.com</a>'));
 check('safe URLs become links', f.includes('<a href="https://github.com/ada">GitHub: ada</a>'));
-check('open-ended role reads as present', f.includes('1842-01 – present'));
+check('open-ended role reads as Present, with a month name', f.includes('Jan 1842 – Present'));
 for (const heading of ['Summary', 'Experience', 'Projects', 'Education', 'Skills']) {
-  check(`renders the ${heading} section`, f.includes(`<h2>${heading}</h2>`));
+  check(`renders the ${heading} section`, h2(f, heading));
 }
-check('experience comes before education', f.indexOf('<h2>Experience</h2>') < f.indexOf('<h2>Education</h2>'));
+check('experience comes before education', f.indexOf('>Experience</h2>') < f.indexOf('>Education</h2>'));
 for (const heading of ['Awards', 'Certifications', 'Publications', 'Volunteering', 'Languages', 'Interests', 'References']) {
-  check(`absent section ${heading} has no heading`, !f.includes(`<h2>${heading}</h2>`));
+  check(`absent section ${heading} has no heading`, !h2(f, heading));
 }
-check('an empty section array has no heading', !ctx.resumeToHtml({ basics: { name: 'A' }, awards: [] }).includes('<h2>Awards</h2>'));
+check('an empty section array has no heading', !ctx.resumeToHtml({ basics: { name: 'A' }, awards: [] }).includes('>Awards</h2>'));
 check('the document has no external resources', !/<(link|script|img)\b|src=/i.test(f));
+
+// ---- live-run findings, 2026-10-27 ----------------------------------------
+// #1 LENGTH: every block element carries its own inline font-size. The import
+// maps h1-h3 to the Doc's named Heading styles and ignores the body's size.
+const blocks = [...f.matchAll(/<(h1|h2|h3|p|li)\b([^>]*)>/g)];
+check('every h1/h2/h3/p/li carries an inline font-size',
+  blocks.length > 10 && blocks.every((m) => /style="[^"]*font-size:\d/.test(m[2])),
+  blocks.filter((m) => !/font-size/.test(m[2])).map((m) => m[0]).join(' '));
+const ptOf = (tag) => Number((new RegExp(`<${tag} style="[^"]*font-size:([\\d.]+)pt`).exec(f) || [])[1]);
+check('h1 is compact (<= 20pt, not Docs\' default 24pt)', ptOf('h1') > 0 && ptOf('h1') <= 20, String(ptOf('h1')));
+check('headings shrink h1 > h2 > h3', ptOf('h1') > ptOf('h2') && ptOf('h2') > ptOf('h3'));
+check('every block element sets its margins', blocks.every((m) => /margin:/.test(m[2])));
+const margins = ctx.marginRequests(43.2);
+const ds = margins[0]?.updateDocumentStyle;
+check('margin request sets all four margins in PT',
+  ['marginTop', 'marginBottom', 'marginLeft', 'marginRight'].every((k) => ds?.documentStyle[k]?.magnitude === 43.2 && ds.documentStyle[k].unit === 'PT')
+  && ds.fields === 'marginTop,marginBottom,marginLeft,marginRight');
+check('allowlist covers the Docs batchUpdate URL', allow.some((p) => (ctx.DOCS_API_URL + 'x:batchUpdate').startsWith(p)));
+
+// #2 HEADLINE WRAP: dates live on their own small line, never inside the h3.
+const h3s = [...f.matchAll(/<h3[^>]*>([\s\S]*?)<\/h3>/g)].map((m) => m[1]);
+check('no h3 contains a date', h3s.length > 0 && h3s.every((t) => !/\d{4}/.test(t)), JSON.stringify(h3s));
+check('dates sit on the grey meta line right under the h3',
+  /<\/h3><p style="[^"]*color:#555555[^"]*">Jan 1842 – Present<\/p>/.test(f));
+
+// #3 DATES: ISO to "Mon YYYY", unparseable strings untouched.
+for (const [inp, want] of [['2024', '2024'], ['2024-08', 'Aug 2024'], ['2024-08-01', 'Aug 2024'],
+  [' 2026-03-01 ', 'Mar 2026'], ['2024-12-31', 'Dec 2024'], ['2024-13', '2024-13'], ['2024-00', '2024-00'],
+  ['2024-02-45', '2024-02-45'], ['Summer 2019', 'Summer 2019'], ['', ''], [undefined, ''], [2024, '2024']]) {
+  check(`formatDate(${JSON.stringify(inp)}) = ${JSON.stringify(want)}`, ctx.formatDate(inp) === want, JSON.stringify(ctx.formatDate(inp)));
+}
+check('a full range reads "Aug 2024 – Mar 2026"', ctx.dateRange('2024-08-01', '2026-03-01') === 'Aug 2024 – Mar 2026');
+check('an open range ends in Present', ctx.dateRange('2024-08', '') === 'Aug 2024 – Present');
+check('an end date alone is shown alone', ctx.dateRange('', '2020') === '2020');
+check('single dates are formatted (certificates)',
+  ctx.resumeToHtml({ certificates: [{ name: 'CKA', date: '2023-05-02' }] }).includes('May 2023'));
+
+// #4 EDUCATION: studyType and area joined with a comma.
+check('education joins studyType and area with ", "', f.includes('Tutoring, Mathematics'));
+
+// Compact skills: one paragraph per group, no h3.
+check('skills render as one compact paragraph, not an h3',
+  /<p style="[^"]*"><b>Mathematics — Master<\/b>: Bernoulli numbers<\/p>/.test(f) && !h3s.some((t) => t.includes('Mathematics — Master')));
+
+// The registry 301s to jsonresume.org (measured 2026-10-27:
+// registry.jsonresume.org/{user}.json -> jsonresume.org/@{user}.json), and
+// UrlFetchApp follows it, so the redirect target must be allowlisted too.
+check('allowlist covers the registry redirect target', allow.includes('https://jsonresume.org/'));
+
+// #5 PROJECT TYPE: the raw enum is not printed.
+const proj = ctx.resumeToHtml({ projects: [{ name: 'X', type: 'application', roles: ['Lead'] }] });
+check('project type enum is dropped', !proj.includes('application'));
+check('project roles still show', proj.includes('Lead'));
+
+// #6/#7 CARD HINTS: Studio renders hint text as HTML, so an <angle>
+// placeholder vanishes. Build both cards through the stub and read the text.
+ctx.onConfigLoadJsonResume();
+ctx.onConfigRenderResume();
+const hints = cardCalls.filter(([k]) => k === 'setHint' || k === 'setTitle').map(([, a]) => String(a[0]));
+check('card hints were captured', hints.length >= 4, String(hints.length));
+check('no card hint or title contains "<"', hints.every((h) => !h.includes('<')), JSON.stringify(hints.filter((h) => h.includes('<'))));
+const loadHint = cardCalls.find(([k, a]) => k === 'setHint' && String(a[0]).includes('registry.jsonresume.org'))?.[1][0] || '';
+const hintHosts = [...loadHint.matchAll(/https:\/\/([^/\s]+)\//g)].map((m) => m[1]).sort();
+const resumeHosts = allow.map((u) => u.replace(/^https:\/\//, '').split('/')[0]).filter((h) => !h.endsWith('googleapis.com')).sort();
+check('Load hint lists exactly the allowlisted résumé hosts',
+  JSON.stringify(hintHosts) === JSON.stringify(resumeHosts), `${JSON.stringify(hintHosts)} vs ${JSON.stringify(resumeHosts)}`);
+check('Load hint no longer promises "any HTTPS URL"', !/any HTTPS URL/i.test(loadHint));
+
+// #6/#8 MANIFEST TEXT: no "<" anywhere, and output descriptions short enough
+// to read as a variable chip ("Step 2: Doc URL").
+const texts = [];
+for (const e of elements) {
+  texts.push(e.description);
+  for (const io of [...e.workflowAction.inputs, ...e.workflowAction.outputs]) texts.push(io.description);
+}
+check('no manifest description contains "<"', texts.every((t) => !t.includes('<')));
+check('no manifest description promises "any HTTPS URL"', texts.every((t) => !/any HTTPS URL/i.test(t)));
+const outDescs = elements.flatMap((e) => e.workflowAction.outputs.map((o) => o.description));
+check('output descriptions are chip-sized (<= 24 chars, no sentence)',
+  outDescs.every((d) => d.length <= 24 && !d.endsWith('.')), JSON.stringify(outDescs));
 
 // ---- degenerate inputs must not throw, and must not leak undefined/null ----
 for (const [label, value] of [['empty object', {}], ['nulls', { basics: null, work: null }],
@@ -211,7 +298,7 @@ for (const who of ['thomasdavis', 'jsonresume']) {
   check(`registry/${who}: no undefined/null leaked`, !/undefined|>null</.test(out));
   check(`registry/${who}: name is present`, !resume.basics?.name || out.includes(ctx.escapeHtml(resume.basics.name)));
   check(`registry/${who}: no script tag`, !/<script/i.test(out));
-  console.log(`       ${who}: ${out.length} chars of HTML, ${(out.match(/<h2>/g) || []).length} sections`);
+  console.log(`       ${who}: ${out.length} chars of HTML, ${(out.match(/<h2 /g) || []).length} sections`);
 }
 
 console.log();
