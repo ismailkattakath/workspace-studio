@@ -104,6 +104,10 @@ check('extra keys are allowed, as in the schema', (() => {
   return !ctx.parseJobInput(JSON.stringify(v)).error;
 })());
 
+const outs = ctx.buildJobOutputs(good);
+check('tracker outputs: location joined, remote/type/salary as given',
+  outs.location === 'Ottawa, CA' && outs.remote === 'Full' && outs.type === 'Contract' && outs.salary === 'CAD 170,000 - 190,000', JSON.stringify(outs));
+check('missing tracker fields are empty strings', Object.values(ctx.buildJobOutputs({ title: 't' })).every((x) => typeof x === 'string'));
 check('job output round-trips as JSON', JSON.parse(ctx.buildJobOutputs(good).job).company === 'Contoso Analytics');
 
 if (failures.length) {

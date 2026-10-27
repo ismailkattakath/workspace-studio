@@ -190,6 +190,38 @@
                 "dataType": {
                   "basicType": "STRING"
                 }
+              },
+              {
+                "id": "location",
+                "description": "Location",
+                "cardinality": "SINGLE",
+                "dataType": {
+                  "basicType": "STRING"
+                }
+              },
+              {
+                "id": "remote",
+                "description": "Remote",
+                "cardinality": "SINGLE",
+                "dataType": {
+                  "basicType": "STRING"
+                }
+              },
+              {
+                "id": "type",
+                "description": "Employment type",
+                "cardinality": "SINGLE",
+                "dataType": {
+                  "basicType": "STRING"
+                }
+              },
+              {
+                "id": "salary",
+                "description": "Salary",
+                "cardinality": "SINGLE",
+                "dataType": {
+                  "basicType": "STRING"
+                }
               }
             ],
             "onConfigFunction": "onConfigParseJobDescription",
@@ -200,7 +232,7 @@
           "id": "applyTailoring",
           "state": "ACTIVE",
           "name": "Apply Tailoring",
-          "description": "Applies a short tailoring patch from an AI step to your base resume in code: only the headline, summary, highlights and skill order change, never employers, titles, dates or degrees.",
+          "description": "Applies a short tailoring patch from an AI step to your base resume in code: the headline and summary may be reworded, highlights and skills only picked and reordered, never employers, titles, dates or degrees.",
           "workflowAction": {
             "inputs": [
               {
@@ -220,12 +252,29 @@
                 "dataType": {
                   "basicType": "STRING"
                 }
+              },
+              {
+                "id": "jobTitle",
+                "description": "Job title (optional)",
+                "cardinality": "SINGLE",
+                "required": false,
+                "dataType": {
+                  "basicType": "STRING"
+                }
               }
             ],
             "outputs": [
               {
                 "id": "resume",
                 "description": "Tailored resume (JSON)",
+                "cardinality": "SINGLE",
+                "dataType": {
+                  "basicType": "STRING"
+                }
+              },
+              {
+                "id": "docTitle",
+                "description": "Document title",
                 "cardinality": "SINGLE",
                 "dataType": {
                   "basicType": "STRING"

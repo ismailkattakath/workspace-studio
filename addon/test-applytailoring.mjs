@@ -67,14 +67,14 @@ const apply = (patch) => ctx.applyTailoringInput(JSON.stringify(base), JSON.stri
 
 const ok = apply({
   label: 'Gen AI Engineer', summary: ' New summary. ',
-  work: [{ index: 0, highlights: ['A3 reworded for RAG', 'A1'] }],
-  projects: [{ index: 0, highlights: ['P2'] }],
+  work: [{ index: 0, highlights: [2, 0] }],
+  projects: [{ index: 0, highlights: [1] }],
   skills: ['LangChain', 'python'],
 });
 check('a valid patch applies', !ok.error, JSON.stringify(ok.error));
 const t = ok.resume;
 check('label and summary change (trimmed)', t.basics.label === 'Gen AI Engineer' && t.basics.summary === 'New summary.');
-check('the patched entry gets the new highlights', JSON.stringify(t.work[0].highlights) === '["A3 reworded for RAG","A1"]');
+check('highlights are picked by index, in the patch order, as the base wording', JSON.stringify(t.work[0].highlights) === '["A3","A1"]');
 check('an unpatched entry is untouched', JSON.stringify(t.work[1]) === JSON.stringify(base.work[1]));
 check('project highlights change', JSON.stringify(t.projects[0].highlights) === '["P2"]');
 check('skills: named first (case-insensitive), the rest keep their order',
@@ -94,14 +94,16 @@ const bad = (name, patch, re) => {
   check(name, !!r.error && re.test(r.error), JSON.stringify(r));
 };
 bad('an unknown top-level key fails (no new facts sneak in)', { education: [] }, /unknown key "education"/);
-bad('changing an employer name fails', { work: [{ index: 0, name: 'Google', highlights: ['x'] }] }, /unknown key "name"/);
-bad('changing a date fails', { work: [{ index: 0, startDate: '2010', highlights: ['x'] }] }, /unknown key "startDate"/);
-bad('an index past the end fails', { work: [{ index: 2, highlights: ['x'] }] }, /index must be 0 to 1/);
-bad('a negative index fails', { work: [{ index: -1, highlights: ['x'] }] }, /index must be/);
-bad('a fractional index fails', { work: [{ index: 0.5, highlights: ['x'] }] }, /index must be/);
-bad('a repeated index fails', { work: [{ index: 0, highlights: ['x'] }, { index: 0, highlights: ['y'] }] }, /repeated/);
+bad('changing an employer name fails', { work: [{ index: 0, name: 'Google', highlights: [0] }] }, /unknown key "name"/);
+bad('changing a date fails', { work: [{ index: 0, startDate: '2010', highlights: [0] }] }, /unknown key "startDate"/);
+bad('an index past the end fails', { work: [{ index: 2, highlights: [0] }] }, /index must be 0 to 1/);
+bad('a negative index fails', { work: [{ index: -1, highlights: [0] }] }, /index must be/);
+bad('a fractional index fails', { work: [{ index: 0.5, highlights: [0] }] }, /index must be/);
+bad('a repeated entry index fails', { work: [{ index: 0, highlights: [0] }, { index: 0, highlights: [1] }] }, /repeated/);
 bad('empty highlights fail', { work: [{ index: 0, highlights: [] }] }, /non-empty array/);
-bad('a blank highlight fails', { work: [{ index: 0, highlights: ['ok', '  '] }] }, /non-empty strings/);
+bad('a WRITTEN highlight fails (bullets are picked, never written)', { work: [{ index: 0, highlights: ['A1 but better'] }] }, /never written/);
+bad('a highlight index past that entry\'s bullets fails', { work: [{ index: 1, highlights: [1] }] }, /not an index 0 to 0/);
+bad('a repeated highlight index fails', { work: [{ index: 0, highlights: [1, 1] }] }, /index 1 is repeated/);
 bad('a skill not in the base fails (no invented skills)', { skills: ['Kubernetes'] }, /"Kubernetes" is not in the base resume/);
 bad('a repeated skill fails', { skills: ['Go', 'go'] }, /repeated/);
 bad('an empty summary fails', { summary: ' ' }, /summary must be a non-empty string/);
@@ -113,6 +115,12 @@ check('a broken base resume fails', /the base resume/.test(ctx.applyTailoringInp
 const dup = { ...base, skills: [{ name: 'Go' }, { name: 'Python' }, { name: 'Go', level: 'x' }] };
 const d = ctx.applyTailoringInput(JSON.stringify(dup), '{"skills":["Python"]}');
 check('a duplicate skill name in the base is kept, not dropped', d.resume && d.resume.skills.length === 3, JSON.stringify(d));
+
+// ---- document title (deepjobseek's <FullName>-<RoleTitle> convention) --------
+check('docTitle is <FullName>-<Role> in PascalCase', ctx.tailoredDocTitle(base, 'Gen AI developer (Hybrid)') === 'AdaLovelace-GenAiDeveloperHybrid', ctx.tailoredDocTitle(base, 'Gen AI developer (Hybrid)'));
+check('docTitle without a job title is the name alone', ctx.tailoredDocTitle(base, '') === 'AdaLovelace');
+check('docTitle keeps accented letters', ctx.pascalCase('résumé écrit') === 'RésuméÉcrit', ctx.pascalCase('résumé écrit'));
+check('docTitle has no character a file name would choke on', /^[\p{L}0-9-]+$/u.test(ctx.tailoredDocTitle(base, 'C++ / .NET: Lead?')));
 
 if (failures.length) {
   console.log(`\n${failures.length} FAILED`);

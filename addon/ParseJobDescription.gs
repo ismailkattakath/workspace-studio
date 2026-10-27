@@ -50,7 +50,11 @@ function onExecuteParseJobDescription(event) {
   var map = {
     job: AddOnsResponseService.newVariableData().addStringValue(o.job),
     title: AddOnsResponseService.newVariableData().addStringValue(o.title),
-    company: AddOnsResponseService.newVariableData().addStringValue(o.company)
+    company: AddOnsResponseService.newVariableData().addStringValue(o.company),
+    location: AddOnsResponseService.newVariableData().addStringValue(o.location),
+    remote: AddOnsResponseService.newVariableData().addStringValue(o.remote),
+    type: AddOnsResponseService.newVariableData().addStringValue(o.type),
+    salary: AddOnsResponseService.newVariableData().addStringValue(o.salary)
   };
   var workflowAction = AddOnsResponseService.newReturnOutputVariablesAction().setVariableDataMap(map);
   var hostAppAction = AddOnsResponseService.newHostAppAction().setWorkflowAction(workflowAction);
@@ -117,6 +121,11 @@ function buildJobOutputs(job) {
   return {
     job: JSON.stringify(job),
     title: str(job.title).trim(),
-    company: str(job.company).trim()
+    company: str(job.company).trim(),
+    location: isPlainObject(job.location) ? joinNonEmpty(['address', 'city', 'region', 'postalCode', 'countryCode']
+      .map(function (k) { return str(job.location[k]).trim(); }), ', ') : '',
+    remote: str(job.remote).trim(),
+    type: str(job.type).trim(),
+    salary: str(job.salary).trim()
   };
 }

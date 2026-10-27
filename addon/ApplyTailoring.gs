@@ -15,15 +15,21 @@
  * other key fails the step):
  *   { "label":    "headline",
  *     "summary":  "two or three sentences",
- *     "work":     [{ "index": 0, "highlights": ["...", "..."] }],
- *     "projects": [{ "index": 1, "highlights": ["..."] }],
+ *     "work":     [{ "index": 0, "highlights": [2, 0] }],
+ *     "projects": [{ "index": 1, "highlights": [1] }],
  *     "skills":   ["Python", "LangChain"] }
  *
- * index is the entry's position in the base resume's work/projects array; its
- * highlights are replaced (reordered, reworded or trimmed). skills names base
- * skills, most relevant first; unnamed ones keep their order after them. An
- * index out of range, a repeated index or an unknown skill fails the step: no
- * repair, the same rule as the other steps.
+ * index is the entry's position in the base resume's work/projects array.
+ * highlights are INDEXES into that entry's own base highlights: the patch can
+ * pick, order and drop bullets but never write one, so every bullet stays the
+ * operator's own words (deepjobseek's evidence rule, which Studio cannot query,
+ * enforced the only way code can). skills names base skills, most relevant
+ * first; unnamed ones keep their order after them. An index out of range, a
+ * repeat or an unknown skill fails the step: no repair, the same rule as the
+ * other steps.
+ *
+ * docTitle is the submitted-file name convention from deepjobseek's render.sh:
+ * <FullNameInPascalCase>-<RoleTitleInPascalCase>, e.g. IsmailKattakath-GenAiDeveloper.
  */
 
 var PATCH_KEYS = ['label', 'summary', 'work', 'projects', 'skills'];
@@ -45,14 +51,20 @@ function onConfigApplyTailoring() {
     .setMultiline(true)
     .setHint('Pick the output of the Ask Gemini step that wrote the tailoring patch.')
     .setHostAppDataSource(variables());
+  var jobTitle = CardService.newTextInput()
+    .setFieldName('jobTitle') // MUST equal the manifest inputs[].id
+    .setTitle('Job title (optional)')
+    .setHint('Pick "Job title" from Parse Job Description; it names the document.')
+    .setHostAppDataSource(variables());
   return CardService.newCardBuilder()
     .setHeader(CardService.newCardHeader().setTitle('Apply Tailoring'))
     .addSection(CardService.newCardSection()
       .addWidget(CardService.newTextParagraph().setText(
-        'Applies a tailoring patch to your base resume. Only the headline, summary, highlights and ' +
-        'skill order can change; <b>employers, titles, dates and degrees stay as they are</b>.'))
+        'Applies a tailoring patch to your base resume. Only the headline and summary can be reworded; ' +
+        'highlights and skills can only be <b>picked and reordered</b>, and employers, titles, dates and degrees stay as they are.'))
       .addWidget(resume)
-      .addWidget(patch))
+      .addWidget(patch)
+      .addWidget(jobTitle))
     .build();
 }
 
@@ -64,7 +76,11 @@ function onExecuteApplyTailoring(event) {
   var out = applyTailoringInput(readActionInput(inputs, 'resume'), readActionInput(inputs, 'patch'));
   if (out.error) return failStep('Could not apply the tailoring: ' + out.error);
 
-  var map = { resume: AddOnsResponseService.newVariableData().addStringValue(JSON.stringify(out.resume)) };
+  var map = {
+    resume: AddOnsResponseService.newVariableData().addStringValue(JSON.stringify(out.resume)),
+    docTitle: AddOnsResponseService.newVariableData().addStringValue(
+      tailoredDocTitle(out.resume, readActionInput(inputs, 'jobTitle')))
+  };
   var workflowAction = AddOnsResponseService.newReturnOutputVariablesAction().setVariableDataMap(map);
   var hostAppAction = AddOnsResponseService.newHostAppAction().setWorkflowAction(workflowAction);
   return AddOnsResponseService.newRenderActionBuilder().setHostAppAction(hostAppAction).build();
@@ -95,7 +111,8 @@ function applyTailoring(base, patch) {
   if ('summary' in patch) resume.basics.summary = patch.summary.trim();
   ['work', 'projects'].forEach(function (section) {
     (patch[section] || []).forEach(function (p) {
-      resume[section][p.index].highlights = p.highlights.map(function (h) { return h.trim(); });
+      var original = base[section][p.index].highlights;
+      resume[section][p.index].highlights = p.highlights.map(function (i) { return original[i]; });
     });
   });
   if (patch.skills) resume.skills = reorderSkills(resume.skills, patch.skills);
@@ -132,9 +149,20 @@ function patchProblems(base, patch) {
       } else {
         seen[p.index] = true;
       }
-      if (!Array.isArray(p.highlights) || !p.highlights.length ||
-          p.highlights.some(function (h) { return typeof h !== 'string' || !h.trim(); })) {
-        problems.push(where + '.highlights must be a non-empty array of non-empty strings');
+      var own = (entries[p.index] && Array.isArray(entries[p.index].highlights)) ? entries[p.index].highlights : [];
+      if (!Array.isArray(p.highlights) || !p.highlights.length) {
+        problems.push(where + '.highlights must be a non-empty array of highlight indexes');
+      } else {
+        var seenH = {};
+        p.highlights.forEach(function (h) {
+          if (typeof h !== 'number' || h % 1 !== 0 || h < 0 || h >= own.length) {
+            problems.push(where + '.highlights: ' + JSON.stringify(h) + ' is not an index 0 to ' + (own.length - 1) +
+              ' (highlights are picked by index, never written)');
+          } else if (seenH[h]) {
+            problems.push(where + '.highlights: index ' + h + ' is repeated');
+          }
+          seenH[h] = true;
+        });
       }
     });
   });
@@ -164,4 +192,17 @@ function reorderSkills(skills, order) {
   });
   var rest = skills.filter(function (s) { return first.indexOf(s) < 0; }); // a duplicate name is kept, not dropped
   return first.concat(rest);
+}
+
+/** <FullNameInPascalCase>-<RoleTitleInPascalCase>; the name alone without a title. */
+function tailoredDocTitle(resume, jobTitle) {
+  var name = pascalCase(resume && resume.basics && resume.basics.name);
+  var role = pascalCase(jobTitle);
+  return joinNonEmpty([name || 'Resume', role], '-');
+}
+
+/** "Gen AI developer (Hybrid)" -> "GenAiDeveloperHybrid"; accents kept as letters. */
+function pascalCase(text) {
+  return str(text).split(/[^0-9A-Za-z\u00C0-\u024F]+/).filter(function (w) { return w; })
+    .map(function (w) { return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase(); }).join('');
 }
