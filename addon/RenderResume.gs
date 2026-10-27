@@ -122,6 +122,13 @@ function onExecuteRenderResume(event) {
   } catch (err) {
     console.error('RenderResume: margins not applied: ' + err.message);
   }
+  // Normal text's paragraph-level size and spacing (see namedStyleRequests).
+  // A separate call, so a rejection here cannot cost the margins above.
+  try {
+    docsBatchUpdate(token, doc.id, namedStyleRequests());
+  } catch (err) {
+    console.error('RenderResume: Normal text style not applied: ' + err.message);
+  }
 
   var pdf = { id: '', webViewLink: '' };
   try {
@@ -364,18 +371,49 @@ function joinNonEmpty(parts, sep) {
  * instead. Inline styles were chosen because they live in the HTML this file
  * tests offline, and cost no extra API call or failure mode. If a re-run
  * shows the import dropping them, updateNamedStyle is the fallback.)
+ *
+ * WHOLE POINTS ONLY. The second live run (2026-10-27) asked for an h3 at
+ * 10.5pt and the Doc came back with 10pt text runs: the import appears to
+ * round half-points down. So every size here is an integer.
+ *
+ * Spacing (second live run: 4 pages, last one half full; target 2-3): line
+ * height 1.0 instead of 1.15, and tighter block margins. Untested live.
  */
-var FONT = 'font-family:Arial,sans-serif;line-height:1.15;';
+var FONT = 'font-family:Arial,sans-serif;line-height:1.0;';
 var STYLES = {
   h1: FONT + 'font-size:18pt;font-weight:bold;margin:0 0 2pt 0',
   label: FONT + 'font-size:11pt;font-weight:bold;margin:0 0 2pt 0',
-  h2: FONT + 'font-size:12pt;font-weight:bold;margin:10pt 0 3pt 0',
-  h3: FONT + 'font-size:10.5pt;font-weight:bold;margin:6pt 0 0 0',
-  meta: FONT + 'font-size:9.5pt;color:#555555;margin:0 0 2pt 0',
-  p: FONT + 'font-size:10pt;margin:0 0 3pt 0',
-  ul: 'margin:0 0 3pt 0',
+  h2: FONT + 'font-size:12pt;font-weight:bold;margin:8pt 0 2pt 0',
+  h3: FONT + 'font-size:11pt;font-weight:bold;margin:4pt 0 0 0',
+  meta: FONT + 'font-size:9pt;color:#555555;margin:0 0 1pt 0',
+  p: FONT + 'font-size:10pt;margin:0 0 2pt 0',
+  ul: 'margin:0 0 2pt 0',
   li: FONT + 'font-size:10pt;margin:0'
 };
+
+/**
+ * Named-style requests for the Doc's Normal text. The second live run showed
+ * each paragraph keeping Normal text's 11pt / 1.15 at PARAGRAPH level (only
+ * the text runs were 10pt), which likely adds line height per paragraph.
+ * Setting Normal text to 10pt, single spacing, no paragraph gaps fixes that
+ * at the source. Sent as its own best-effort batchUpdate. Untested live.
+ */
+function namedStyleRequests() {
+  return [{
+    updateNamedStyle: {
+      namedStyle: {
+        namedStyleType: 'NORMAL_TEXT',
+        textStyle: { fontSize: { magnitude: 10, unit: 'PT' } },
+        paragraphStyle: {
+          lineSpacing: 100,
+          spaceAbove: { magnitude: 0, unit: 'PT' },
+          spaceBelow: { magnitude: 0, unit: 'PT' }
+        }
+      },
+      fields: 'textStyle.fontSize,paragraphStyle.lineSpacing,paragraphStyle.spaceAbove,paragraphStyle.spaceBelow'
+    }
+  }];
+}
 
 /** One element with its inline style. `inner` is already-escaped HTML. */
 function el(tag, styleKey, inner) {

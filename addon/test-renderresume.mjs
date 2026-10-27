@@ -207,6 +207,19 @@ const ds = margins[0]?.updateDocumentStyle;
 check('margin request sets all four margins in PT',
   ['marginTop', 'marginBottom', 'marginLeft', 'marginRight'].every((k) => ds?.documentStyle[k]?.magnitude === 43.2 && ds.documentStyle[k].unit === 'PT')
   && ds.fields === 'marginTop,marginBottom,marginLeft,marginRight');
+// Second live run: a 10.5pt h3 imported as 10pt (half-points round down), so
+// every size must be a whole number of points.
+const sizes = [...f.matchAll(/font-size:([\d.]+)pt/g)].map((m) => m[1]);
+check('every font-size is a whole number of points', sizes.length > 0 && sizes.every((s) => /^\d+$/.test(s)),
+  sizes.filter((s) => !/^\d+$/.test(s)).join(','));
+check('blocks use single line spacing', blocks.every((m) => /line-height:1\.0;/.test(m[2])));
+const ns = ctx.namedStyleRequests()[0]?.updateNamedStyle;
+check('Normal text named style: 10pt, single spacing, no paragraph gaps',
+  ns?.namedStyle.namedStyleType === 'NORMAL_TEXT'
+  && ns.namedStyle.textStyle.fontSize.magnitude === 10 && ns.namedStyle.textStyle.fontSize.unit === 'PT'
+  && ns.namedStyle.paragraphStyle.lineSpacing === 100
+  && ns.namedStyle.paragraphStyle.spaceAbove.magnitude === 0 && ns.namedStyle.paragraphStyle.spaceBelow.magnitude === 0
+  && ns.fields === 'textStyle.fontSize,paragraphStyle.lineSpacing,paragraphStyle.spaceAbove,paragraphStyle.spaceBelow');
 check('allowlist covers the Docs batchUpdate URL', allow.some((p) => (ctx.DOCS_API_URL + 'x:batchUpdate').startsWith(p)));
 
 // #2 HEADLINE WRAP: dates live on their own small line, never inside the h3.
