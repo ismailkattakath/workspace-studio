@@ -125,8 +125,12 @@ render a *tailored* résumé.
 
 ## Deploying it — the honest path
 
-**Platform status:** Workspace Studio custom steps are **generally available** (announced
-September 2026). No platform blocker.
+**Platform status:** Workspace Studio custom steps are in **limited preview** — Google's admin
+page says "This feature is in limited preview." ([Allow or block custom steps][custom-steps-admin],
+last updated 2026-10-22). Workspace Studio itself launched in September 2026; the custom-step
+surface did not reach general availability with it, so availability can vary by domain.
+
+[custom-steps-admin]: https://knowledge.workspace.google.com/admin/studio/allow-or-block-ws-custom-steps?hl=en
 
 **Check this before writing any more code:** custom steps are **OFF by default**. A super-admin
 must enable them at *Admin console → Apps → Google Workspace → Workspace Studio: Custom steps
