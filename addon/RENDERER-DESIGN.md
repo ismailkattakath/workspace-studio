@@ -114,7 +114,7 @@ outputs: docId · docUrl · pdfFileId · pdfUrl   (all STRING, cardinality SINGL
 |---|---|---|
 | `toMarkdown()`, uploaded as `text/markdown` | `resumeToHtml()`, uploaded as `text/html` | HTML was this doc's own fallback (question 1). It is the measured path, and HTML can carry links, bold and lists without depending on Markdown dialect support |
 | PDF always, failure undefined | PDF is **best-effort**: an export failure keeps the Doc, returns empty `pdf*` outputs, and logs the reason | the Doc already exists. Failing the run would hide it from later steps |
-| no allowlist | `urlFetchWhitelist` added | a **versioned** deployment requires it (test deployments do not). It cannot say "any host", so it also narrows Load JSON Resume to the listed résumé hosts in a versioned deployment |
+| no allowlist | `urlFetchWhitelist` added | a **versioned** deployment requires it. It cannot say "any host", and a declared list is enforced, so it also narrows Load JSON Resume to the listed résumé hosts |
 | (unspecified) | `documents.batchUpdate` **not used** | measured to work, but nothing in the render needs it yet. Margins or fonts could use it later |
 | (unspecified) | the résumé is treated as **untrusted**: every value escaped, `href` only for `http(s)` without credentials, `basics.image` dropped | the input often comes from an AI step that read an inbox |
 
@@ -155,6 +155,8 @@ targets Node and cannot run in Apps Script — no npm, no filesystem.
    first rendered Doc by eye.
 2. ~~Does `drive.file` alone authorise both the create AND the `/export`?~~ **ANSWERED
    2026-10-27: yes.** Create, export and the PDF create all work with `drive.file` alone.
+5. **Is a declared `urlFetchWhitelist` enforced on a TEST deployment?** The reference says
+   only that the field is optional there. Assume yes: the résumé URL's host must be listed.
 3. **Can Gmail's native "Send a message" step attach a Drive file**, or only interpolate
    `pdfUrl` into the body? The indexed corpus is the developer docs only and contains no
    catalogue of native steps. Plan for a link; treat attachment as a bonus.

@@ -232,10 +232,12 @@ Declaring the service turns it on and **adds no scope**. The code never calls th
 
 **URL allowlist (`urlFetchWhitelist`):** optional for a **test** deployment, **required** for a
 **versioned** one. Entries must be `https://` with a full domain and a path, with at most one
-leading `*` for subdomains. **There is no "any host" entry.** So in a versioned deployment, Load
-JSON Resume can only fetch from the listed hosts: `registry.jsonresume.org`,
-`raw.githubusercontent.com`, `gist.githubusercontent.com` and `gitlab.com`. Add a host to the
-manifest to serve a résumé from anywhere else. A test deployment keeps "any HTTPS URL".
+leading `*` for subdomains. **There is no "any host" entry.** Once declared, the list is
+enforced: *"script projects can't access URLs that have not been added to the allowlist"*. The
+page does not exempt test deployments, so assume it applies to them too (unverified). **Load
+JSON Resume can therefore fetch only from the listed hosts:** `registry.jsonresume.org`,
+`raw.githubusercontent.com`, `gist.githubusercontent.com` and `gitlab.com`. To serve a résumé
+from anywhere else, add its host to the manifest. This narrows the "any HTTPS URL" promise above.
 
 **Use the web editor for the first run, not `clasp`.** `clasp` is in nixpkgs as
 `nixpkgs#google-clasp` (note: `nixpkgs#clasp` is a different program entirely), but it

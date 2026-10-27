@@ -24,7 +24,9 @@ const read = (f) => readFileSync(join(here, f), 'utf8');
 // readActionInput(), failStep(), hasAnyKnownSection() and MAX_BYTES from
 // LoadJsonResume.gs, so loading it alone would hide a missing dependency.
 const ctx = createContext({ console });
+let loadGlobals = [];
 for (const f of ['LoadJsonResume.gs', 'RenderResume.gs']) {
+  if (f === 'RenderResume.gs') loadGlobals = Object.keys(ctx);
   try {
     runInContext(read(f), ctx, { filename: f });
     console.log(`  ok   ${f} parses`);
@@ -39,6 +41,12 @@ const check = (name, cond, detail = '') => {
   if (cond) console.log(`  ok   ${name}`);
   else { console.log(`  FAIL ${name} ${detail}`); failures.push(name); }
 };
+
+// ONE global scope: a function RenderResume.gs redefines would silently
+// replace LoadJsonResume.gs's copy in production. Detect it from the source.
+const redefined = [...read('RenderResume.gs').matchAll(/^(?:function|var)\s+([A-Za-z_$][\w$]*)/gm)]
+  .map((m) => m[1]).filter((n) => loadGlobals.includes(n));
+check('RenderResume.gs redefines nothing from LoadJsonResume.gs', redefined.length === 0, JSON.stringify(redefined));
 
 // ---- manifest contract -----------------------------------------------------
 const manifest = JSON.parse(read('appsscript.json'));
