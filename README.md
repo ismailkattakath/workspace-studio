@@ -11,13 +11,10 @@ Collections:
 | `workspace-studio` | 17 pages | 314 | 0.741 |
 | `nix-darwin` | 1 page (the whole option manual) | 511 | 0.667 |
 
-## Also here: a Workspace Studio step
+## Moved: the Workspace Studio step
 
-[`addon/`](addon/) holds **Load JSON Resume** — a Google Workspace Studio custom step that
-fetches a `resume.json` in the [jsonresume.org](https://jsonresume.org) standard from a URL the
-user configures and hands it to the rest of their flow. It deliberately does **not** tailor the
-résumé: flows already have a native "ask Gemini" step, so this one stays deterministic, needs no
-API key, and never reads the job posting. See [`addon/README.md`](addon/README.md).
+The JSON Resume step that used to live in `addon/` is now its own project,
+[JSON Resume Connect](https://github.com/ismailkattakath/jsonresume-connect).
 
 ## Why this exists
 

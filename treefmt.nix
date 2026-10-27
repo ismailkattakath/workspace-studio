@@ -20,10 +20,6 @@
   programs.black.enable = true;
   programs.shfmt.enable = true;
 
-  # `addon/` is Apps Script: `.gs` files are JavaScript that no formatter here claims, and the
-  # one `.mjs`/`.json` pair is not worth pulling prettier in for. Left unmatched, which treefmt
-  # simply skips.
-
   # What no formatter of ours may rewrite. The `formatting` check compares the tree against
   # treefmt's own output, so a formatter that rewrites generated output turns the gate red on a
   # file nobody edits. treefmt globs match at ANY DEPTH.

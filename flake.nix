@@ -99,7 +99,6 @@
       devPackagesFor = pkgs: [
         (pythonFor pkgs) # python3 + the three runtime deps
         pkgs.postgresql # psql — how bench.sh reaches the store
-        pkgs.nodejs # node — addon/test-loadjsonresume.mjs
       ];
 
       # Binaries this repo's own scripts and CI shell out to and that MUST
@@ -112,24 +111,17 @@
       requiredBins = [
         "python3" # ingest.py, test_chunk.py
         "psql" # bench.sh
-        "node" # addon/test-loadjsonresume.mjs
       ];
 
       # ── The project's own test command. ───────────────────────────────────────
-      # All three of this repo's contract suites, which are also the three BLOCKING
-      # steps in .github/workflows/ci.yml. There is no test runner — each file IS
-      # its suite, and each exits non-zero on failure (CLAUDE.md § Commands).
+      # This repo's contract suite, which is also the BLOCKING test step in
+      # .github/workflows/ci.yml. There is no test runner — the file IS its
+      # suite, and it exits non-zero on failure (CLAUDE.md § Commands).
       #
-      # All run clean inside the no-network sandbox because every dependency
-      # comes from the nixpkgs pin, so nothing is vendored by hand here:
-      #   - test_chunk.py imports only `ingest`, whose three deps are in `py`;
-      #   - both .mjs suites use node stdlib, and each one's ONE network section (two live
-      #     JSON Resume registry fetches) is already written to `continue` with a
-      #     `skip` line when the fetch throws. Sandboxed, those five live-resume
-      #     assertions are skipped; the ~25 pure ones — parse, URL guard,
-      #     formInputs shape, headline formatting, degenerate inputs — all run.
-      #     test-renderresume.mjs works the same way: only its registry
-      #     render checks skip; escaping, href guard and manifest contract run.
+      # It runs clean inside the no-network sandbox because test_chunk.py imports
+      # only `ingest`, whose three deps come from the nixpkgs pin in `py`.
+      # (The Workspace Studio add-on that used to live in `addon/` moved to its
+      # own repo, ismailkattakath/jsonresume-connect, with its node suites.)
       #
       # NOT run here, on purpose: `./bench.sh`. It needs Postgres + pgvector + an
       # Ollama model, i.e. three services, so it stays the local gate CLAUDE.md
@@ -139,10 +131,6 @@
       projectGate = {
         command = ''
           python3 test_chunk.py
-          node addon/test-loadjsonresume.mjs
-          node addon/test-renderresume.mjs
-          node addon/test-parsejob.mjs
-          node addon/test-applytailoring.mjs
         '';
         packages = pkgs: devPackagesFor pkgs;
       };
@@ -198,21 +186,12 @@
           # Narrow fileset for the gate. A bare `./.` copies the whole working
           # tree into the store on every edit, so touching `sources/` or
           # `probes/` would rebuild a check that cannot even see them. These
-          # paths are exactly what the three suites read.
+          # paths are exactly what the suite reads.
           gateSrc = lib.fileset.toSource {
             root = ./.;
             fileset = lib.fileset.unions [
               ./ingest.py
               ./test_chunk.py
-              ./addon/test-loadjsonresume.mjs
-              ./addon/LoadJsonResume.gs
-              ./addon/test-renderresume.mjs
-              ./addon/RenderResume.gs
-              ./addon/test-parsejob.mjs
-              ./addon/ParseJobDescription.gs
-              ./addon/test-applytailoring.mjs
-              ./addon/ApplyTailoring.gs
-              ./addon/appsscript.json
             ];
           };
         in
