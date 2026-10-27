@@ -57,6 +57,16 @@ check('keeps the username', ctx.unwrapResumePayload({ username: 'u', resume: {} 
 check('a bare resume passes through', ctx.unwrapResumePayload({ basics: { name: 'B' } }).resume.basics.name === 'B');
 check('a non-object resume field is not unwrapped', ctx.unwrapResumePayload({ resume: 'x' }).resume.resume === 'x');
 
+// ---- the "refresh" link -----------------------------------------------------
+// The config event's shape, verbatim from a live run (2026-10-27).
+const cfgEvent = { hostApp: 'flows', commonEventObject: { platform: 'WEB', hostApp: 'WORKFLOW' }, clientPlatform: 'web',
+  workflow: { elementConfiguration: { workflowId: 'f61fb2a3402b226570eb0d4e929af1066', displayDestination: 'DISPLAY_DESTINATION_FULL_SCREEN' } } };
+check('reads the flow id from the config event', ctx.flowIdFromConfigEvent(cfgEvent) === 'f61fb2a3402b226570eb0d4e929af1066');
+check('no event, no id', ctx.flowIdFromConfigEvent(undefined) === '');
+check('a non-id flow id is refused', ctx.flowIdFromConfigEvent({ workflow: { elementConfiguration: { workflowId: '"><script>' } } }) === '');
+check('the link points at this flow', ctx.flowPageUrl('abc_1-2') === 'https://studio.workspace.google.com/workflow/abc_1-2');
+check('no id falls back to the flow list', ctx.flowPageUrl('') === 'https://studio.workspace.google.com/manage');
+
 // ---- Studio action-invocation shape ---------------------------------------
 // THESE TESTS USED TO ENCODE THE BUG. They asserted the generic add-on card
 // shape, formInputs[field].stringInputs.value[0] — which is a real shape, just

@@ -44,7 +44,13 @@ var TEXT_SECTIONS = ['work', 'projects', 'education', 'skills', 'certificates', 
  */
 var JR_ORIGIN = 'https://jsonresume.org';
 
-function onConfigLoadJsonResume() {
+function onConfigLoadJsonResume(event) {
+  // The config event carries the flow's id (live, 2026-10-27):
+  //   {"workflow":{"elementConfiguration":{"workflowId":"…","displayDestination":"…"}}}
+  // The connect card is built by a separate callback, so keep the id briefly
+  // in the user cache for its "refresh" link.
+  var workflowId = flowIdFromConfigEvent(event);
+  if (workflowId) CacheService.getUserCache().put('JR_WORKFLOW_ID', workflowId, 600);
   var service = jsonResumeService();
   if (!service.hasAccess()) {
     CardService.newAuthorizationException()
@@ -82,7 +88,10 @@ function jsonResumeConnectCard() {
       .setText('Connect JSON Resume')
       .setAuthorizationAction(CardService.newAuthorizationAction().setAuthorizationUrl(url)))
     .addWidget(CardService.newTextParagraph().setText(
-      'After connecting, refresh this page.'));
+      // A plain link: Studio strips <b> both around and inside a link, and opens
+      // every card link in a NEW tab (target=_blank), measured live 2026-10-27.
+      'After connecting, <a href="' + escapeHtml(flowPageUrl(CacheService.getUserCache().get('JR_WORKFLOW_ID'))) +
+      '">refresh</a> this page.'));
   return [CardService.newCardBuilder()
     .setHeader(CardService.newCardHeader().setTitle('Load JSON Resume'))
     .addSection(section)
@@ -410,4 +419,19 @@ function unwrapResumePayload(payload) {
     return { username: str(payload.username), resume: payload.resume };
   }
   return { username: '', resume: payload };
+}
+
+/** The flow id from a config event, or '' when Studio did not send one. */
+function flowIdFromConfigEvent(event) {
+  var id = event && event.workflow && event.workflow.elementConfiguration &&
+    event.workflow.elementConfiguration.workflowId;
+  return /^[A-Za-z0-9_-]+$/.test(str(id)) ? str(id) : '';
+}
+
+/** This flow's page in Studio (the "refresh" link); the flow list if the id is unknown. */
+function flowPageUrl(workflowId) {
+  var id = str(workflowId);
+  return /^[A-Za-z0-9_-]+$/.test(id)
+    ? 'https://studio.workspace.google.com/workflow/' + id
+    : 'https://studio.workspace.google.com/manage';
 }

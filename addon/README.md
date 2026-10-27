@@ -4,15 +4,20 @@ Two custom steps in one add-on:
 
 | Step | Does | File |
 |---|---|---|
-| **Load JSON Resume** | fetches a `resume.json` from a URL and emits it as outputs | `LoadJsonResume.gs` |
+| **Load JSON Resume** | loads your résumé from your JSON Resume account (**Connect JSON Resume**), validates it, and emits it as outputs | `LoadJsonResume.gs` |
 | **Render Resume to Doc** | renders a `resume.json` string into a Google Doc, with PDF and DOCX download links | `RenderResume.gs` |
 
 ## Load JSON Resume
 
-Fetches a `resume.json` in the [jsonresume.org](https://jsonresume.org) standard from a URL you
-configure, and hands it to the rest of your flow. Point it at your résumé and it works — the
-registry, a GitHub raw file or gist, or a GitLab raw file (the hosts in the manifest's
-allowlist, § Deploying it).
+Loads **your own** résumé from your [jsonresume.org](https://jsonresume.org) account through
+**Connect JSON Resume** ("Sign in with JSON Resume", OAuth 2.1), and hands it to the rest of
+your flow. **That is the only source**, on purpose (2026-10-27): no URL, paste or Drive field.
+Connecting tells a new user they need a JSON Resume account, and its dashboard keeps the résumé
+for them.
+
+**The résumé must match the [jsonresume.org schema](https://github.com/jsonresume/resume-schema).**
+An invalid shape **fails the step** with the first problems listed. It is never repaired: this is
+the base résumé, so the fix belongs at the source.
 
 ## What it does, and what it deliberately doesn't
 
@@ -40,16 +45,39 @@ step, so the tailoring belongs there. That split is the whole design:
 [Gmail: create draft]   ← put docUrl / pdfUrl / docxUrl in the body
 ```
 
-## Configuration
+## Configuration: Connect JSON Resume
 
-One field, on the step's configuration card:
+The step has **no fields**. Its card shows one button:
 
-| Field | Example |
+| Card state | Shows |
 |---|---|
-| **Your JSON Resume URL** | `https://registry.jsonresume.org/{username}.json` |
-| | `https://raw.githubusercontent.com/{user}/{repo}/main/resume.json` |
-| | `https://gist.githubusercontent.com/{user}/{id}/raw/resume.json` |
-| | `https://gitlab.com/{user}/{repo}/-/raw/main/resume.json` |
+| Not connected | **Connect JSON Resume**, plus "After connecting, refresh this page" |
+| Connected | "Connected to JSON Resume as @username", plus **Disconnect** |
+
+1. **No account yet?** Create one at jsonresume.org. **Sign in with GitHub:** the dashboard stores
+   your résumé as a GitHub gist it creates for you, using your GitHub sign-in (upstream
+   `gistOperations.js`, read 2026-10-27). An email-and-password account cannot create one.
+2. Click **Connect JSON Resume** and approve **"Read your resume"** on jsonresume.org.
+3. **Refresh the Studio page** (the card's **refresh** link opens this flow fresh in a new tab).
+   Studio does not redraw a step card after a sign-in in another tab, and reopening the step
+   does not help, measured 2026-10-27. Clicking Connect again also shows it connected.
+
+**Known upstream bug:** signing in to jsonresume.org **with GitHub** during Connect lands on
+`/dashboard` instead of the approval screen
+([jsonresume/jsonresume.org#636](https://github.com/jsonresume/jsonresume.org/issues/636)).
+Click **Connect JSON Resume** again.
+
+**How the connection works:**
+
+| Piece | Value | Evidence |
+|---|---|---|
+| Library | [OAuth2 for Apps Script](https://github.com/googleworkspace/apps-script-oauth2), vendored as `OAuth2.gs` at `aae9287` (Apache-2.0) | that commit fixes token refresh for clients without a secret (#513) |
+| Client | registered once per deployment through jsonresume.org's self-serve dynamic client registration (`/api/oauth/register`): a public client, **no secret** | measured 2026-10-27 |
+| Security | PKCE S256 (required by jsonresume.org) | measured |
+| Redirect | `https://script.google.com/macros/d/{scriptId}/usercallback` | measured: accepted |
+| Scope | `resume:read` | |
+| Tokens | access 1 h, refresh 90 days, kept in the user's own `UserProperties` | measured |
+| Fetch | `GET https://jsonresume.org/api/oauth/resume` → `{ username, url, resume }` | measured: 200 |
 
 ## Outputs
 
@@ -112,7 +140,7 @@ left out on purpose: an external image URL is a tracking beacon.
 
 | Scope | Needed by | Grants |
 |---|---|---|
-| `script.external_request` | both steps | outbound HTTPS |
+| `script.external_request` | both steps | outbound HTTPS (jsonresume.org sign-in and fetch; Drive/Docs REST) |
 | `drive.file` | Render Resume to Doc | **only the files this add-on creates** |
 
 Neither step reads your mail or calendar. The renderer cannot see any Drive file it did not
@@ -135,11 +163,12 @@ So `RenderResume.gs` uses **no `DocumentApp` and no `DriveApp`**. It calls REST 
 ## Install
 
 1. Create an Apps Script project, set it to the **V8** runtime.
-2. Copy `LoadJsonResume.gs`, `RenderResume.gs` and `appsscript.json` into it.
+2. Copy `LoadJsonResume.gs`, `RenderResume.gs`, `OAuth2.gs` and `appsscript.json` into it.
 3. Deploy as a Workspace add-on and add the steps to a flow.
 
 `RenderResume.gs` reuses `str()`, `readActionInput()`, `failStep()`, `hasAnyKnownSection()` and
-`MAX_BYTES` from `LoadJsonResume.gs`. Apps Script loads every `.gs` file into **one global
+`MAX_BYTES` from `LoadJsonResume.gs`, and Load uses `resumeShapeProblems()` and `escapeHtml()`
+from `RenderResume.gs`. Apps Script loads every `.gs` file into **one global
 scope**, so both files must be in the project, and neither may redefine the other's functions.
 
 ## Tests
@@ -157,8 +186,8 @@ offline.
 
 Apps Script cannot run off Google's servers, so the Workspace Studio integration itself has to
 be verified by installing the add-on. Everything that does **not** touch `CardService` or
-`UrlFetchApp` is plain JavaScript, and that is where the bugs live — so the URL guard, the
-`formInputs` shape and the per-section headline formatting are tested against **real résumés
+`UrlFetchApp` is plain JavaScript, and that is where the bugs live — so the sign-in response
+unwrapping, the `formInputs` shape and the per-section headline formatting are tested against **real résumés
 fetched from the live registry**, not fixtures written to match the code.
 
 ## Notes from building it
@@ -286,11 +315,10 @@ page does not exempt test deployments. **But the 2026-10-27 live run contradicts
 reading:** under a test deployment with the list declared, Load JSON Resume fetched
 `registry.jsonresume.org/{user}.json`, which 301s to `jsonresume.org`, then not on the list.
 So either a test deployment does not enforce the list, or redirect targets are not checked.
-Which one is unmeasured. A **versioned** deployment is where the list certainly applies. **Load
-JSON Resume can therefore fetch only from the listed hosts:** `registry.jsonresume.org`,
-`jsonresume.org` (the registry's redirect target), `raw.githubusercontent.com`,
-`gist.githubusercontent.com` and `gitlab.com`. To serve a résumé
-from anywhere else, add its host to the manifest. This narrows the "any HTTPS URL" promise above.
+Which one is unmeasured. A **versioned** deployment is where the list certainly applies.
+
+**Since Load became Connect-only (2026-10-27), the list is three entries:** `jsonresume.org`
+(sign-in, token and résumé) and Google's own `www.googleapis.com` and `docs.googleapis.com`.
 
 **Use the web editor for the first run, not `clasp`.** `clasp` is in nixpkgs as
 `nixpkgs#google-clasp` (note: `nixpkgs#clasp` is a different program entirely), but it
@@ -300,7 +328,7 @@ first light, when `clasp push` beats re-pasting.
 
 1. Create an Apps Script project, runtime **V8**.
 2. Project Settings → tick *Show `appsscript.json` manifest file in editor*.
-3. Paste `appsscript.json`, `LoadJsonResume.gs` and `RenderResume.gs`.
+3. Paste `appsscript.json`, `LoadJsonResume.gs`, `RenderResume.gs` and `OAuth2.gs`.
 4. **Deploy → Test deployments → Install → Done.**
 5. Refresh Workspace Studio and authorise the add-on.
 
@@ -310,13 +338,15 @@ Chat*, with `name`, `label` and `resumeText` as variable chips in the message.
 | What you see | Meaning |
 |---|---|
 | The real name and headline from your résumé | **works** |
-| The `resumeUrl` field never appears, or won't persist | the input is not declared in `inputs[]` |
+| "not connected to JSON Resume" | open the step, click **Connect JSON Resume**, refresh the page |
+| "connection expired or was revoked" | connect again |
+| "your JSON Resume account has no resume yet" | create it in the jsonresume.org dashboard |
+| "does not match the jsonresume.org schema: …" | fix the listed fields in your résumé |
 | Step errors, or outputs are unavailable as chips | the return shape is wrong |
-| `…returned HTML, not JSON…` or `HTTP 404` | code is fine — **your URL is wrong** |
 
-**Where to look when it fails:** Apps Script editor → **Executions** first; `onExecute` logs the
-entire event object as its first statement, so the real payload is visible on run one. Then the
-flow's **Activity** tab for the user-facing error.
+**Where to look when it fails:** the flow's **Activity** tab first, for the user-facing error.
+Then Apps Script editor → **Executions**; `onExecute` logs which inputs arrived (never the
+résumé itself, which is personal data).
 
 ## Verified running — 2026-09-30
 
