@@ -141,6 +141,7 @@
           python3 test_chunk.py
           node addon/test-loadjsonresume.mjs
           node addon/test-renderresume.mjs
+          node addon/test-parsejob.mjs
         '';
         packages = pkgs: devPackagesFor pkgs;
       };
@@ -206,6 +207,8 @@
               ./addon/LoadJsonResume.gs
               ./addon/test-renderresume.mjs
               ./addon/RenderResume.gs
+              ./addon/test-parsejob.mjs
+              ./addon/ParseJobDescription.gs
               ./addon/appsscript.json
             ];
           };

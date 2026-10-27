@@ -77,6 +77,11 @@ jobs:
       - name: Renderer contract tests
         run: nix run nixpkgs#nodejs -- addon/test-renderresume.mjs
 
+      # The job-posting gate: the jsonresume.org job schema check, the
+      # EMAIL_ADDRESS reply output, and its manifest contract.
+      - name: Job parser contract tests
+        run: nix run nixpkgs#nodejs -- addon/test-parsejob.mjs
+
       # Extraction is the layer most likely to break without any code change,
       # because it depends on a third party's HTML. A dry run writes nothing and
       # touches no database; it just proves pages still yield an article body.

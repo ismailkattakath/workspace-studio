@@ -42,7 +42,7 @@ const ctx = createContext({
   CacheService: { getUserCache: () => ({}) }, LockService: { getUserLock: () => ({}) },
 });
 let loadGlobals = [];
-for (const f of ['LoadJsonResume.gs', 'RenderResume.gs']) {
+for (const f of ['LoadJsonResume.gs', 'RenderResume.gs', 'ParseJobDescription.gs']) {
   if (f === 'RenderResume.gs') loadGlobals = Object.keys(ctx);
   try {
     runInContext(read(f), ctx, { filename: f });

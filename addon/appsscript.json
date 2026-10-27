@@ -148,6 +148,69 @@
             "onConfigFunction": "onConfigRenderResume",
             "onExecuteFunction": "onExecuteRenderResume"
           }
+        },
+        {
+          "id": "parseJobDescription",
+          "state": "ACTIVE",
+          "name": "Parse Job Description",
+          "description": "Checks a job posting that an AI step wrote as JSON against the jsonresume.org job schema, fails if it does not match, and emits the job plus the original sender to reply to.",
+          "workflowAction": {
+            "inputs": [
+              {
+                "id": "jobJson",
+                "description": "Job posting (JSON)",
+                "cardinality": "SINGLE",
+                "required": true,
+                "dataType": {
+                  "basicType": "STRING"
+                }
+              }
+            ],
+            "outputs": [
+              {
+                "id": "job",
+                "description": "Job (JSON)",
+                "cardinality": "SINGLE",
+                "dataType": {
+                  "basicType": "STRING"
+                }
+              },
+              {
+                "id": "title",
+                "description": "Job title",
+                "cardinality": "SINGLE",
+                "dataType": {
+                  "basicType": "STRING"
+                }
+              },
+              {
+                "id": "company",
+                "description": "Company",
+                "cardinality": "SINGLE",
+                "dataType": {
+                  "basicType": "STRING"
+                }
+              },
+              {
+                "id": "replyTo",
+                "description": "Original sender",
+                "cardinality": "SINGLE",
+                "dataType": {
+                  "basicType": "EMAIL_ADDRESS"
+                }
+              },
+              {
+                "id": "replySubject",
+                "description": "Reply subject",
+                "cardinality": "SINGLE",
+                "dataType": {
+                  "basicType": "STRING"
+                }
+              }
+            ],
+            "onConfigFunction": "onConfigParseJobDescription",
+            "onExecuteFunction": "onExecuteParseJobDescription"
+          }
         }
       ]
     }

@@ -243,35 +243,12 @@ function multipartFrame(boundary, metadata, mediaType) {
 
 /**
  * Parses the resume input. Returns {resume} or {error}, and never throws.
- *
- * The input is often an AI step's output, so it is wrapped in a ```json fence
- * more often than not. The fence is stripped rather than rejected.
  */
 function parseResumeInput(text) {
-  var raw = str(text).trim();
-  if (!raw) return { error: 'no resume JSON was given. Open the step and pick the "resume" output of Load JSON Resume.' };
-  if (raw.length > MAX_BYTES) return { error: 'the resume exceeds the ' + Math.round(MAX_BYTES / 1024 / 1024) + ' MB limit.' };
-
-  var fenced = /^```[a-zA-Z]*\s*\n([\s\S]*?)\n?```$/.exec(raw);
-  if (fenced) raw = fenced[1].trim();
-
-  var resume;
-  try {
-    resume = JSON.parse(raw);
-  } catch (e) {
-    // An AI step may add a sentence around its fenced JSON. Take the one
-    // fenced block if there is exactly one; anything else stays an error.
-    var blocks = raw.match(/```[a-zA-Z]*\s*\n[\s\S]*?\n?```/g) || [];
-    if (blocks.length !== 1) return { error: 'the input is not valid JSON.' };
-    try {
-      resume = JSON.parse(/^```[a-zA-Z]*\s*\n([\s\S]*?)\n?```$/.exec(blocks[0])[1]);
-    } catch (e2) {
-      return { error: 'the input is not valid JSON.' };
-    }
-  }
-  if (!resume || typeof resume !== 'object' || Array.isArray(resume)) {
-    return { error: 'the input is not a JSON object.' };
-  }
+  var got = parseJsonObjectInput(text,
+    'no resume JSON was given. Open the step and pick the "resume" output of Load JSON Resume.');
+  if (got.error) return got;
+  var resume = got.value;
   if (!hasAnyKnownSection(resume)) {
     return { error: 'no jsonresume.org sections found (expected basics, work, education, skills or projects).' };
   }
@@ -281,6 +258,41 @@ function parseResumeInput(text) {
       (problems.length > 5 ? ' (and ' + (problems.length - 5) + ' more)' : '') + '.' };
   }
   return { resume: resume };
+}
+
+/**
+ * One JSON object from a step input: {value} or {error}; never throws. Shared
+ * by every step that reads JSON (Parse Job Description too).
+ *
+ * The input is often an AI step's output, so it is wrapped in a ```json fence
+ * more often than not. The fence is stripped rather than rejected.
+ */
+function parseJsonObjectInput(text, emptyMessage) {
+  var raw = str(text).trim();
+  if (!raw) return { error: emptyMessage || 'no JSON was given.' };
+  if (raw.length > MAX_BYTES) return { error: 'the input exceeds the ' + Math.round(MAX_BYTES / 1024 / 1024) + ' MB limit.' };
+
+  var fenced = /^```[a-zA-Z]*\s*\n([\s\S]*?)\n?```$/.exec(raw);
+  if (fenced) raw = fenced[1].trim();
+
+  var value;
+  try {
+    value = JSON.parse(raw);
+  } catch (e) {
+    // An AI step may add a sentence around its fenced JSON. Take the one
+    // fenced block if there is exactly one; anything else stays an error.
+    var blocks = raw.match(/```[a-zA-Z]*\s*\n[\s\S]*?\n?```/g) || [];
+    if (blocks.length !== 1) return { error: 'the input is not valid JSON.' };
+    try {
+      value = JSON.parse(/^```[a-zA-Z]*\s*\n([\s\S]*?)\n?```$/.exec(blocks[0])[1]);
+    } catch (e2) {
+      return { error: 'the input is not valid JSON.' };
+    }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { error: 'the input is not a JSON object.' };
+  }
+  return { value: value };
 }
 
 // The jsonresume.org v1 schema's sections that are arrays of objects.
