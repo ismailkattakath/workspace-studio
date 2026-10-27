@@ -195,6 +195,46 @@
             "onConfigFunction": "onConfigParseJobDescription",
             "onExecuteFunction": "onExecuteParseJobDescription"
           }
+        },
+        {
+          "id": "applyTailoring",
+          "state": "ACTIVE",
+          "name": "Apply Tailoring",
+          "description": "Applies a short tailoring patch from an AI step to your base resume in code: only the headline, summary, highlights and skill order change, never employers, titles, dates or degrees.",
+          "workflowAction": {
+            "inputs": [
+              {
+                "id": "resume",
+                "description": "Base resume (JSON)",
+                "cardinality": "SINGLE",
+                "required": true,
+                "dataType": {
+                  "basicType": "STRING"
+                }
+              },
+              {
+                "id": "patch",
+                "description": "Tailoring patch (JSON)",
+                "cardinality": "SINGLE",
+                "required": true,
+                "dataType": {
+                  "basicType": "STRING"
+                }
+              }
+            ],
+            "outputs": [
+              {
+                "id": "resume",
+                "description": "Tailored resume (JSON)",
+                "cardinality": "SINGLE",
+                "dataType": {
+                  "basicType": "STRING"
+                }
+              }
+            ],
+            "onConfigFunction": "onConfigApplyTailoring",
+            "onExecuteFunction": "onExecuteApplyTailoring"
+          }
         }
       ]
     }

@@ -142,6 +142,7 @@
           node addon/test-loadjsonresume.mjs
           node addon/test-renderresume.mjs
           node addon/test-parsejob.mjs
+          node addon/test-applytailoring.mjs
         '';
         packages = pkgs: devPackagesFor pkgs;
       };
@@ -209,6 +210,8 @@
               ./addon/RenderResume.gs
               ./addon/test-parsejob.mjs
               ./addon/ParseJobDescription.gs
+              ./addon/test-applytailoring.mjs
+              ./addon/ApplyTailoring.gs
               ./addon/appsscript.json
             ];
           };

@@ -24,7 +24,7 @@ const stub = new Proxy(function () {}, {
 });
 const ctx = createContext({ console, CardService: stub, AddOnsResponseService: stub });
 let earlierGlobals = [];
-for (const f of ['LoadJsonResume.gs', 'RenderResume.gs', 'ParseJobDescription.gs']) {
+for (const f of ['LoadJsonResume.gs', 'RenderResume.gs', 'ParseJobDescription.gs', 'ApplyTailoring.gs']) {
   if (f === 'ParseJobDescription.gs') earlierGlobals = Object.keys(ctx);
   try {
     runInContext(read(f), ctx, { filename: f });
