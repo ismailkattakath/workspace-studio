@@ -1,0 +1,18 @@
+name: status-labels
+
+# Thin caller of the shared kattakath/.github status-labels workflow: keeps the
+# `auto-merge` and `merge-queue` labels in sync with the PR's live state, so they
+# show in the PR list. pull_request_target because a fork PR's pull_request token
+# is read-only; safe because nothing here checks out or runs PR code.
+on:
+  pull_request_target:
+    types: [auto_merge_enabled, auto_merge_disabled, enqueued, dequeued, closed, reopened, synchronize]
+concurrency:
+  group: status-labels-${{ github.event.pull_request.number }}
+  cancel-in-progress: true   # every run recomputes from live state, so the latest wins
+permissions:
+  pull-requests: write
+  issues: write
+jobs:
+  sync:
+    uses: kattakath/.github/.github/workflows/status-labels.yml@3d5ad5b9e04c853dbb0d82446255c9ef9230332a

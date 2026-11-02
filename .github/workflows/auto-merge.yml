@@ -1,0 +1,22 @@
+name: auto-merge
+
+# Thin caller of the shared kattakath/.github auto-merge workflow: arms squash
+# auto-merge on a same-repo, non-draft, non-Dependabot PR with the CI App's token,
+# so the merge it makes still starts push:main workflows. A fork's PR is never
+# armed; a maintainer merges it after review. Dependabot PRs are armed by
+# arm-dependabot.yml where the repo has Dependabot.
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+concurrency:
+  group: auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: false   # true let a later event cancel the ready_for_review arm (nix-config #750)
+permissions:
+  contents: read
+jobs:
+  arm:
+    uses: kattakath/.github/.github/workflows/auto-merge.yml@3d5ad5b9e04c853dbb0d82446255c9ef9230332a
+    with:
+      client-id: ${{ vars.CI_BOT_CLIENT_ID }}
+    secrets:
+      app-private-key: ${{ secrets.CI_BOT_APP_PRIVATE_KEY }}
