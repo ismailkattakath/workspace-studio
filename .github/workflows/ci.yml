@@ -22,22 +22,47 @@
 # already runs on.
 name: ci
 
+# ONE REQUIRED CHECK: `gate` (shared, kattakath/.github). It always runs and asserts
+# that every job it `needs` ended EXACTLY as this event expects, so a skipped job can
+# never pass for a green one ("A job that is skipped will report its status as
+# Success", GitHub docs). `check` runs on every PR here: this repo is owned by a
+# personal account, so GitHub offers it no merge queue and QUEUE_ENABLED stays unset.
+# No `push: main` leg: nothing chains off it, and it only re-ran the PR's suite on
+# the same tree after the merge.
 on:
   pull_request:
-  push:
-    branches: [main]
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  # Supersede stale PR runs; never cancel a queue run.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 jobs:
+  # THE ONLY REQUIRED CHECK. Its job id is part of the ruleset; never rename it or
+  # give it a `name:`.
+  gate:
+    if: ${{ !cancelled() }}
+    needs: [check]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      # `expect` holds a deliberate SECOND copy of `check`'s `if:`. If the two
+      # copies drift, gate goes red, so a bad edit fails closed.
+      - uses: kattakath/.github/actions/gate@3d5ad5b9e04c853dbb0d82446255c9ef9230332a
+        with:
+          needs: ${{ toJSON(needs) }}
+          expect: >-
+            {"check": ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository || vars.QUEUE_ENABLED != 'true' }}}
+
   check:
     name: flake + contract tests
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository || vars.QUEUE_ENABLED != 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
