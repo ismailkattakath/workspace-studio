@@ -13,7 +13,7 @@
   # name upstream); `nixpkgs-fmt` is archived and must not be reached for.
   programs.nixfmt.enable = true;
 
-  # This repo is Python-first (`ingest.py`, `test_chunk.py`) with two bash drivers
+  # This repo is Python-first (`ingest.py`, `test_ingest.py`) with two bash drivers
   # (`bench.sh`, `ingest-parallel.sh`). Those are the file types it actually has, so those are
   # the only formatters enabled — each one enabled pulls its tool into the closure of both
   # `nix fmt` and the `formatting` check, so an unused one is pure download.

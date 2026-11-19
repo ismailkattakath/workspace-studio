@@ -1,64 +1,60 @@
 #!/usr/bin/env python3
-"""Fetch web documentation, extract the article body, chunk it, and store it in
-the local pgvector corpus (`ragdb.docs`).
+"""Fetch web documentation, extract the article body, and upload each page as
+ONE item to the operator's private Cloudflare AI Search instance.
 
-THE CONTRACT THIS FILE OBEYS is the `rag` skill (kattakath/skills), not one
-invented here:
+THE CONTRACT THIS FILE OBEYS:
 
-  - table `docs` is (id, content, metadata jsonb, embedding vector(768));
-  - embeddings are computed IN POSTGRES by `embed(text)`, which calls local
-    Ollama (nomic-embed-text). This script never builds a vector itself, so the
-    ingest and query sides can never drift onto different models;
-  - text is parameterized, never concatenated into SQL;
-  - chunks are ~500-1000 characters on paragraph boundaries with a little
-    overlap, because embedding quality degrades on long passages;
-  - re-ingesting a source DELETES its old rows first, so a changed page does not
-    leave stale chunks behind.
+  - one item per page. AI Search chunks and embeds each item itself
+    (server-side, one pinned embedding model for ingest AND query), so this
+    script never splits text and never builds a vector;
+  - the item KEY is derived from the page URL by `item_key()`, byte for byte
+    the formula the operator's corpus export used. Re-uploading an existing key
+    is an UPSERT (the API returns the same item id), so a re-ingest REPLACES
+    the page rather than adding a second copy;
+  - the item BODY is `# {title}\\n\\nSource: {url}\\n\\n{text}\\n`, the export's
+    format, so a re-ingest produces the same document the export did;
+  - metadata is the instance's filterable fields only: corpus, source, url,
+    title (each <= 256 chars).
 
-Nothing leaves the machine: Postgres and Ollama are both loopback.
+Where it goes: Cloudflare-hosted, PRIVATE (the instance's public endpoint is
+off). It is reached only with a scoped API token, from $CLOUDFLARE_AI_SEARCH_TOKEN
+or the macOS login Keychain item `cf:cloudflare.com:ai-search`. The account id
+comes from $CF_ACCOUNT_ID; it is per-person data and never lives in this repo.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import re
+import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
 from dataclasses import dataclass
+from typing import Callable
 
-import psycopg
 import trafilatura
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-# The store is unix-socket only: `pg_hba.conf` has no entry for host
-# 127.0.0.1, so a TCP DSN fails with "no pg_hba.conf entry" even though the
-# port is open. Connect by socket DIRECTORY (libpq treats a leading "/" host as
-# a socket dir), which is also how the fleet's own tooling reaches it.
-#
-# RESOLVED, NOT HARDCODED. This used to be an absolute "/Users/<name>/..."
-# literal, which is a portability bug before it is anything else: the script
-# simply does not run on another machine, or under another account, or if the
-# store ever moves. Environment first (so a caller can point at a different
-# store without editing code), then the XDG data dir, then the conventional
-# location under the invoking user's home — none of which name a person.
-DEFAULT_SOCKET_DIR = os.environ.get("RAGDB_SOCKET_DIR") or os.path.join(
-    os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"),
-    "postgres-pgvector",
-)
-DEFAULT_PORT = int(os.environ.get("RAGDB_PORT", "5433"))
-DEFAULT_DB = os.environ.get("RAGDB_DATABASE", "ragdb")
+API_BASE = "https://api.cloudflare.com/client/v4"
+DEFAULT_NAMESPACE = "default"
+DEFAULT_INSTANCE = "rag"
+DEFAULT_CORPUS = "web"  # the instance's `corpus` value for fetched web pages
+KEYCHAIN_SERVICE = "cf:cloudflare.com:ai-search"
+TOKEN_ENV = "CLOUDFLARE_AI_SEARCH_TOKEN"
+ACCOUNT_ENV = "CF_ACCOUNT_ID"
+METADATA_MAX = 256  # the API's per-value limit on filterable metadata
+KEY_MAX = 128  # the API's limit on an item key
 
-# Chunking. The rag skill's guidance is 500-1000 chars; 900 with 150 overlap
-# sits at the top of that band, which keeps a whole procedure step together on
-# these pages while still giving the splitter room to find a natural boundary.
-CHUNK_CHARS = 900
-CHUNK_OVERLAP = 150
-MIN_CHUNK_CHARS = 80  # below this a chunk is nav crumbs, not content
+USER_AGENT = "workspace-studio-ingest/2.0 (+knowledge base; contact: repo owner)"
 
-USER_AGENT = "workspace-studio-ingest/1.0 (+local knowledge base; contact: repo owner)"
+
+class ConfigError(RuntimeError):
+    """A missing credential or setting. Raised before any page is fetched."""
 
 
 @dataclass
@@ -92,8 +88,8 @@ def extract(html: str, url: str) -> Page | None:
 
     `include_comments=False` and the default boilerplate removal are the whole
     reason trafilatura is here rather than pandoc: a devsite page is mostly
-    navigation, and navigation text embedded into a corpus produces confident
-    retrieval of menu labels.
+    navigation, and navigation text in a corpus produces confident retrieval of
+    menu labels.
     """
     meta = trafilatura.extract_metadata(html)
     title = (getattr(meta, "title", None) or url.rstrip("/").rsplit("/", 1)[-1]).strip()
@@ -111,106 +107,182 @@ def extract(html: str, url: str) -> Page | None:
     return Page(url=url, title=title, text=text.strip())
 
 
-# One splitter instance, reused. The separator order is the point of
-# RecursiveCharacterTextSplitter: it tries paragraph breaks first, then single
-# newlines, then sentence ends, then spaces, and only falls back to a hard
-# character cut when nothing better exists. That is precisely the behaviour the
-# hand-rolled version was groping toward — and the reason it had bugs, since
-# each fallback level is its own edge case.
-#
-# `keep_separator` preserves the markdown structure trafilatura emitted, so a
-# chunk does not silently lose the newline that separated a heading from its
-# body.
-def _make_splitter(
-    size: int = CHUNK_CHARS, overlap: int = CHUNK_OVERLAP
-) -> RecursiveCharacterTextSplitter:
-    return RecursiveCharacterTextSplitter(
-        chunk_size=size,
-        chunk_overlap=overlap,
-        separators=["\n\n", "\n", ". ", " ", ""],
-        keep_separator=True,
-        length_function=len,
+# ── The item key. ─────────────────────────────────────────────────────────────
+# VERBATIM from the operator's corpus export (2026-11-19). Do not "tidy" it: a
+# key that differs by one byte creates a SECOND item for the same page instead
+# of replacing the first, and the old copy then lives on as a stale duplicate.
+# test_ingest.py pins a verified example.
+def slug(s, n):
+    s = re.sub(r"^https?://", "", s)
+    s = re.sub(r"[^A-Za-z0-9._/-]+", "-", s).strip("-/")
+    s = s.replace("/", "_")
+    return s[:n].strip("-_.") or "doc"
+
+
+def item_key(corpus, ident):  # ident = the page URL
+    h = hashlib.sha1(ident.encode()).hexdigest()[:10]
+    base = f"{corpus}/"
+    room = 128 - len(base) - len(h) - len("-.md")
+    return f"{base}{slug(ident, room)}-{h}.md"
+
+
+def render_body(page: Page) -> str:
+    """The export's document format, exactly."""
+    return f"# {page.title}\n\nSource: {page.url}\n\n{page.text}\n"
+
+
+def item_metadata(page: Page, corpus: str = DEFAULT_CORPUS) -> dict[str, str]:
+    return {
+        "corpus": corpus,
+        "source": page.url[:METADATA_MAX],
+        "url": page.url[:METADATA_MAX],
+        "title": page.title[:METADATA_MAX],
+    }
+
+
+def build_multipart(
+    key: str, body: str, metadata: dict[str, str], *, boundary: str | None = None
+) -> tuple[str, bytes]:
+    """multipart/form-data with a `file` part (filename = the item key) and a
+    `metadata` part (a JSON string). Stdlib has no multipart encoder, and this
+    is two fixed parts, so a dependency would be bigger than the problem."""
+    boundary = boundary or f"----ingest-{uuid.uuid4().hex}"
+    safe_key = key.replace("\\", "\\\\").replace('"', '\\"')
+    parts = [
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="file"; filename="{safe_key}"\r\n'
+        "Content-Type: text/markdown\r\n\r\n".encode(),
+        body.encode("utf-8"),
+        b"\r\n",
+        f"--{boundary}\r\n"
+        # A plain form field, no Content-Type: the verified API shape is a
+        # `metadata` part holding a JSON STRING; only `file` names a type.
+        'Content-Disposition: form-data; name="metadata"\r\n\r\n'.encode(),
+        json.dumps(metadata, ensure_ascii=False).encode("utf-8"),
+        f"\r\n--{boundary}--\r\n".encode(),
+    ]
+    return f"multipart/form-data; boundary={boundary}", b"".join(parts)
+
+
+def items_url(
+    account_id: str, instance: str, namespace: str = DEFAULT_NAMESPACE
+) -> str:
+    return (
+        f"{API_BASE}/accounts/{account_id}/ai-search/namespaces/{namespace}"
+        f"/instances/{instance}/items"
     )
 
 
-_SPLITTER = _make_splitter()
+def _retry_after(exc: urllib.error.HTTPError, fallback: float) -> float:
+    try:
+        return max(float(exc.headers.get("Retry-After", "")), 0.0)
+    except (TypeError, ValueError, AttributeError):
+        return fallback
 
 
-def chunk(
-    text: str, splitter: RecursiveCharacterTextSplitter | None = None
-) -> list[str]:
-    """Split into ~CHUNK_CHARS passages on the most natural boundary available.
+def upload(
+    key: str,
+    body: str,
+    metadata: dict[str, str],
+    *,
+    url: str,
+    token: str,
+    retries: int = 5,
+    timeout: int = 60,
+    opener: Callable = urllib.request.urlopen,
+    sleep: Callable[[float], None] = time.sleep,
+) -> tuple[bool, str]:
+    """Upload ONE item. Returns (ok, detail) and never raises for an API error,
+    so one bad page cannot abort a run.
 
-    OFF THE SHELF ON PURPOSE. This used to be ~60 lines of hand-rolled window
-    walking; see the note on `langchain-text-splitters` in flake.nix for why it
-    is not any more.
-
-    The one local policy is what to do with a RUNT — a fragment shorter than
-    MIN_CHUNK_CHARS that the splitter isolated, e.g. a short lead-in followed by
-    a long unbroken block. Runts are usually navigation crumbs and embed badly,
-    so the first version simply DROPPED them.
-
-    That was lossy, and the contract test caught it: a paragraph whose opening
-    words split off as a 13-character fragment lost those words from the corpus
-    entirely. Dropping content silently is worse than a slightly oversized
-    chunk, so a runt is now COALESCED into whichever neighbour has room, and
-    only kept standalone when neither does. Nothing is discarded.
+    Retries 429 and 5xx (and network errors) with exponential backoff, honouring
+    Retry-After. Any other 4xx fails at once: it will not get better. The token
+    is a parameter, never resolved here, and never appears in `detail`.
     """
-    pieces = [c.strip() for c in (splitter or _SPLITTER).split_text(text) if c.strip()]
-    out: list[str] = []
-    for piece in pieces:
-        if len(piece) >= MIN_CHUNK_CHARS:
-            out.append(piece)
-            continue
-        # Runt: prefer merging backwards (keeps reading order natural), then
-        # forwards, and only stand alone if neither neighbour can absorb it.
-        if out and len(out[-1]) + len(piece) + 1 <= CHUNK_CHARS:
-            out[-1] = f"{out[-1]} {piece}"
-        else:
-            out.append(piece)
-    # A runt that landed first with a large follower is still standalone here;
-    # merge it forward if that fits, so the common "short lead-in" case is
-    # covered in both directions.
-    if (
-        len(out) > 1
-        and len(out[0]) < MIN_CHUNK_CHARS
-        and len(out[0]) + len(out[1]) + 1 <= CHUNK_CHARS
-    ):
-        out[0] = f"{out[0]} {out[1]}"
-        del out[1]
-    return out
+    content_type, data = build_multipart(key, body, metadata)
+    for attempt in range(1, retries + 1):
+        backoff = float(2**attempt)
+        req = urllib.request.Request(
+            url,
+            data=data,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": content_type,
+                "User-Agent": USER_AGENT,
+            },
+        )
+        try:
+            with opener(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+            try:
+                doc = json.loads(raw)
+            except json.JSONDecodeError:
+                return False, f"non-JSON response: {raw[:200]}"
+            if doc.get("success") is True:
+                item_id = (doc.get("result") or {}).get("id", "?")
+                return True, f"item {item_id}"
+            return False, f"success=false: {json.dumps(doc.get('errors'))[:300]}"
+        except urllib.error.HTTPError as exc:
+            retryable = exc.code == 429 or 500 <= exc.code < 600
+            try:
+                detail = exc.read().decode("utf-8", errors="replace")[:300]
+            except Exception:  # noqa: BLE001 - a body we cannot read is just absent
+                detail = ""
+            if not retryable or attempt == retries:
+                return False, f"HTTP {exc.code}: {detail}"
+            sleep(_retry_after(exc, backoff) if exc.code == 429 else backoff)
+        except (urllib.error.URLError, TimeoutError) as exc:
+            if attempt == retries:
+                return False, f"network: {exc}"
+            sleep(backoff)
+    return False, "retries exhausted"
 
 
-def store(
-    conn: psycopg.Connection, page: Page, chunks: list[str], collection: str
-) -> int:
-    """Replace this source's rows, then insert the new ones.
+def resolve_token(
+    env: dict[str, str] | None = None, run: Callable = subprocess.run
+) -> str:
+    """$CLOUDFLARE_AI_SEARCH_TOKEN, else the macOS login Keychain. The value is
+    returned to be USED; nothing here prints or logs it."""
+    env = os.environ if env is None else env
+    token = (env.get(TOKEN_ENV) or "").strip()
+    if token:
+        return token
+    try:
+        proc = run(
+            ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        raise ConfigError(
+            f"no ${TOKEN_ENV} and no macOS `security` CLI to read the Keychain item "
+            f"{KEYCHAIN_SERVICE!r} — export ${TOKEN_ENV} on this machine"
+        ) from None
+    token = (proc.stdout or "").strip()
+    if proc.returncode != 0 or not token:
+        raise ConfigError(
+            f"no ${TOKEN_ENV}, and Keychain item {KEYCHAIN_SERVICE!r} could not be "
+            f"read (security exit {proc.returncode})"
+        )
+    return token
 
-    DELETE-then-INSERT in ONE transaction is what makes a re-run idempotent
-    rather than additive. `embed($1)` runs in Postgres — see the module docstring.
-    """
-    with conn.cursor() as cur:
-        cur.execute("DELETE FROM docs WHERE metadata->>'source' = %s", (page.url,))
-        for i, body in enumerate(chunks):
-            metadata = {
-                "source": page.url,
-                "title": page.title,
-                "collection": collection,
-                "chunk": i,
-                "chunks_total": len(chunks),
-                "ingested_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            }
-            cur.execute(
-                "INSERT INTO docs (content, metadata, embedding) VALUES (%s, %s::jsonb, embed(%s))",
-                (body, json.dumps(metadata), body),
-            )
-    return len(chunks)
+
+def resolve_account(env: dict[str, str] | None = None) -> str:
+    env = os.environ if env is None else env
+    account = (env.get(ACCOUNT_ENV) or "").strip()
+    if not account:
+        raise ConfigError(
+            f"${ACCOUNT_ENV} is not set — the Cloudflare account id is per-person "
+            "data and is never stored in this repo"
+        )
+    return account
 
 
-def main() -> int:
-    # Line-buffer stdout. Python block-buffers when stdout is a pipe or file, so
-    # a long or stuck run looks like it produced NOTHING rather than showing how
-    # far it got — which is exactly how the chunker hang above hid itself.
+def main(argv: list[str] | None = None) -> int:
+    # Line-buffer stdout: Python block-buffers a pipe, so a long or stuck run
+    # would otherwise look like it produced NOTHING.
     sys.stdout.reconfigure(line_buffering=True)
 
     ap = argparse.ArgumentParser(
@@ -221,73 +293,81 @@ def main() -> int:
         "--url-file", help="file with one URL per line (# comments ignored)"
     )
     ap.add_argument(
-        "--collection", required=True, help="logical corpus name, stored in metadata"
+        "--corpus",
+        default=DEFAULT_CORPUS,
+        help="the item's `corpus` metadata AND key prefix (default: web)",
     )
-    ap.add_argument("--socket-dir", default=DEFAULT_SOCKET_DIR)
-    ap.add_argument("--port", type=int, default=DEFAULT_PORT)
-    ap.add_argument("--db", default=DEFAULT_DB)
+    ap.add_argument("--instance", default=DEFAULT_INSTANCE)
+    ap.add_argument("--namespace", default=DEFAULT_NAMESPACE)
     ap.add_argument(
         "--delay", type=float, default=1.0, help="seconds between fetches (be polite)"
     )
     ap.add_argument(
-        "--dry-run", action="store_true", help="extract and chunk, write nothing"
+        "--dry-run",
+        action="store_true",
+        help="fetch and extract, print each item key and size, upload nothing",
     )
-    # Exposed so a source with an unusual shape can be MEASURED at several
-    # settings rather than argued about. The default is the rag skill's
-    # 500-1000 band; override it only with a probe comparison to justify it.
-    ap.add_argument("--chunk-size", type=int, default=CHUNK_CHARS)
-    ap.add_argument("--chunk-overlap", type=int, default=CHUNK_OVERLAP)
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     urls = list(args.urls)
     if args.url_file:
         with open(args.url_file, encoding="utf-8") as fh:
             urls += [ln.strip() for ln in fh if ln.strip() and not ln.startswith("#")]
-    # de-duplicate, preserving order
-    urls = list(dict.fromkeys(urls))
+    urls = list(dict.fromkeys(urls))  # de-duplicate, preserving order
     if not urls:
         ap.error("no URLs given")
 
-    splitter = _make_splitter(args.chunk_size, args.chunk_overlap)
-
-    conn = None
+    # Credentials are checked ONCE, before the first fetch, so a missing token
+    # fails in a second instead of after a whole crawl. A dry run needs neither.
+    endpoint = token = None
     if not args.dry_run:
-        conn = psycopg.connect(host=args.socket_dir, port=args.port, dbname=args.db)
+        try:
+            endpoint = items_url(resolve_account(), args.instance, args.namespace)
+            token = resolve_token()
+        except ConfigError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
 
-    pages = failed = total_chunks = 0
+    pages = 0
+    failed: list[str] = []
     for n, url in enumerate(urls, 1):
         print(f"[{n}/{len(urls)}] {url}")
         html = fetch(url)
-        if html is None:
-            failed += 1
-            continue
-        page = extract(html, url)
+        page = extract(html, url) if html is not None else None
         if page is None:
-            print("  ! no article body extracted", file=sys.stderr)
-            failed += 1
-            continue
-        pieces = chunk(page.text, splitter)
-        if not pieces:
-            print("  ! nothing left after chunking", file=sys.stderr)
-            failed += 1
-            continue
-        print(f"  {page.title}  —  {len(page.text)} chars -> {len(pieces)} chunks")
-        if conn is not None:
-            store(conn, page, pieces, args.collection)
-            conn.commit()
-        pages += 1
-        total_chunks += len(pieces)
+            if html is not None:
+                print("  ! no article body extracted", file=sys.stderr)
+            failed.append(url)
+        else:
+            key = item_key(args.corpus, page.url)
+            body = render_body(page)
+            print(f"  {page.title}  —  {len(body.encode())} bytes -> {key}")
+            if endpoint is not None:
+                ok, detail = upload(
+                    key,
+                    body,
+                    item_metadata(page, args.corpus),
+                    url=endpoint,
+                    token=token,
+                )
+                if ok:
+                    print(f"  uploaded: {detail}")
+                    pages += 1
+                else:
+                    print(f"  ! upload failed: {detail}", file=sys.stderr)
+                    failed.append(url)
+            else:
+                pages += 1
         if n < len(urls):
             time.sleep(args.delay)
 
-    if conn is not None:
-        conn.close()
-
     print(
-        f"\npages={pages} failed={failed} chunks={total_chunks} collection={args.collection}"
-        + ("  (DRY RUN — nothing written)" if args.dry_run else "")
+        f"\npages={pages} failed={len(failed)} corpus={args.corpus} instance={args.instance}"
+        + ("  (DRY RUN — nothing uploaded)" if args.dry_run else "")
     )
-    return 1 if pages == 0 else 0
+    for url in failed:
+        print(f"  failed: {url}", file=sys.stderr)
+    return 1 if failed or pages == 0 else 0
 
 
 if __name__ == "__main__":

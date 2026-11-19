@@ -1,8 +1,9 @@
 {
-  # Ingestion pipeline for the local pgvector knowledge base (`ragdb`).
+  # Ingestion pipeline for the operator's private Cloudflare AI Search instance
+  # (`rag`): fetch, extract, upload one item per page.
   #
-  # WHY A FLAKE AND NOT A requirements.txt: the three dependencies below are the
-  # whole runtime, and all three are already in nixpkgs. Pinning them here means
+  # WHY A FLAKE AND NOT A requirements.txt: the one dependency below is the
+  # whole runtime, and it is already in nixpkgs. Pinning them here means
   # `nix run .#ingest` reproduces the exact extractor on any machine in this
   # fleet, with nothing to install and no virtualenv to drift. Same rail the rest
   # of the fleet uses.
@@ -12,7 +13,7 @@
   # command whose dependencies come from `pip install` cannot run there. These
   # come from the nixpkgs pin, i.e. they are already vendored, which is why
   # `project-gate` below genuinely executes this repo's own test suites.
-  description = "Fetch, extract, chunk and embed web documentation into the local pgvector store";
+  description = "Fetch and extract web documentation, and upload it to a private Cloudflare AI Search instance";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -67,29 +68,10 @@
       #   - a hand-rolled html.parser is exactly the wheel this repo's motto
       #     says not to reinvent, and boilerplate removal is a genuinely hard
       #     problem (trafilatura is a published benchmark leader on it).
-      # psycopg is the PG driver: it parameterizes, which the rag skill
-      # requires ("never string-concatenate user text into SQL").
-      pythonFor =
-        pkgs:
-        pkgs.python3.withPackages (ps: [
-          ps.trafilatura
-          ps.psycopg
-          # The SPLITTER, and the reason this line exists at all: the chunker was
-          # hand-rolled first, and it was the one part of this pipeline with a
-          # mature off-the-shelf answer sitting in nixpkgs the whole time. The
-          # custom version shipped two bugs in a single session — an infinite
-          # loop, and a sentence-boundary backtrack that turned 10,934 chars into
-          # 158 fragments with a median length of 120 — and then acquired ten
-          # property tests to defend a wheel that did not need reinventing.
-          #
-          # `langchain-text-splitters` is the STANDALONE package, not the
-          # LangChain monolith: RecursiveCharacterTextSplitter and friends, no
-          # agent framework, no LLM client, no vector-store opinion. It is the
-          # most exercised chunker in the RAG ecosystem, and it leaves this
-          # pipeline's actual differentiator (in-DB embed(), the shared corpus's
-          # collection namespacing) untouched.
-          ps.langchain-text-splitters
-        ]);
+      # Everything else is stdlib: the upload is one urllib multipart POST per
+      # page. No splitter any more — AI Search chunks and embeds each item
+      # server-side — and no database driver.
+      pythonFor = pkgs: pkgs.python3.withPackages (ps: [ ps.trafilatura ]);
 
       # ── What the dev shell promises. ──────────────────────────────────────────
       # ONE list: `devShells` AND the `toolchain-complete` check both read it, so
@@ -97,8 +79,9 @@
       # in `devShells` would make the check assert against a second copy, i.e.
       # against nothing.
       devPackagesFor = pkgs: [
-        (pythonFor pkgs) # python3 + the three runtime deps
-        pkgs.postgresql # psql — how bench.sh reaches the store
+        (pythonFor pkgs) # python3 + trafilatura
+        pkgs.curl # bench.sh — the AI Search search call
+        pkgs.jq # bench.sh — builds the request, reads the result
       ];
 
       # Binaries this repo's own scripts and CI shell out to and that MUST
@@ -109,8 +92,9 @@
       # map is exactly what a reader editing the list above gets wrong, and
       # nothing else here notices.
       requiredBins = [
-        "python3" # ingest.py, test_chunk.py
-        "psql" # bench.sh
+        "python3" # ingest.py, test_ingest.py
+        "curl" # bench.sh
+        "jq" # bench.sh
       ];
 
       # ── The project's own test command. ───────────────────────────────────────
@@ -118,19 +102,19 @@
       # .github/workflows/ci.yml. There is no test runner — the file IS its
       # suite, and it exits non-zero on failure (CLAUDE.md § Commands).
       #
-      # It runs clean inside the no-network sandbox because test_chunk.py imports
-      # only `ingest`, whose three deps come from the nixpkgs pin in `py`.
+      # It runs clean inside the no-network sandbox because test_ingest.py
+      # imports only `ingest` (trafilatura comes from the nixpkgs pin) and stubs
+      # urllib and the Keychain call so that nothing can reach the API.
       # (The Workspace Studio add-on that used to live in `addon/` moved to its
       # own repo, ismailkattakath/jsonresume-connect, with its node suites.)
       #
-      # NOT run here, on purpose: `./bench.sh`. It needs Postgres + pgvector + an
-      # Ollama model, i.e. three services, so it stays the local gate CLAUDE.md
+      # NOT run here, on purpose: `./bench.sh`. It queries the live AI Search
+      # instance with a scoped token, so it stays the local gate CLAUDE.md
       # § Verifying a change describes. That is a service dependency, not a
-      # vendoring problem — no amount of pinning puts a 768-dim embedder inside
-      # the sandbox.
+      # vendoring problem.
       projectGate = {
         command = ''
-          python3 test_chunk.py
+          python3 test_ingest.py
         '';
         packages = pkgs: devPackagesFor pkgs;
       };
@@ -191,7 +175,7 @@
             root = ./.;
             fileset = lib.fileset.unions [
               ./ingest.py
-              ./test_chunk.py
+              ./test_ingest.py
             ];
           };
         in

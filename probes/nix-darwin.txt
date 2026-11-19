@@ -1,4 +1,7 @@
 # Retrieval probes for the `nix-darwin` collection.
+# 2026-11-19: the corpus moved from local pgvector to Cloudflare AI Search. Every
+# baseline below is a pgvector COSINE score and does not carry over; the first
+# ./bench.sh run against AI Search sets the new baseline — record it here.
 # Baseline 2026-09-29, chunk size 900/150 (the rag skill's default), 511 chunks:
 #   0.606  0.729  0.741  0.719  0.597  0.613   mean 0.667
 #

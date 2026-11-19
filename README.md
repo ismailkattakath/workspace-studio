@@ -1,15 +1,17 @@
 # workspace-studio
 
-Ingestion pipeline that puts web documentation into the **local pgvector corpus** (`ragdb.docs`)
-so it can be retrieved semantically — for material too new to be in a model's training data, and
-too thin or absent in Context7.
+Ingestion pipeline that puts web documentation into the operator's **private Cloudflare AI Search
+instance** (`rag`, namespace `default`) so it can be retrieved semantically from every Claude
+surface — for material too new to be in a model's training data, and too thin or absent in
+Context7.
 
-Collections:
+Collections (a collection is a source list plus a probe file here; in AI Search every page is
+`corpus=web`):
 
-| Collection | Sources | Chunks | Probe mean |
-|---|---|---|---|
-| `workspace-studio` | 17 pages | 314 | 0.741 |
-| `nix-darwin` | 1 page (the whole option manual) | 511 | 0.667 |
+| Collection | Sources (one AI Search item per page) |
+|---|---|
+| `workspace-studio` | 17 pages |
+| `nix-darwin` | 1 page (the whole option manual) |
 
 ## Moved: the Workspace Studio step
 
@@ -31,75 +33,71 @@ the index.
 ## Pipeline
 
 ```
-fetch (urllib)  ->  extract (trafilatura -> markdown)  ->  chunk (~900 chars, overlap)
-                ->  embed IN POSTGRES via embed()      ->  ragdb.docs
+fetch (urllib)  ->  extract (trafilatura -> markdown)  ->  one item per page
+                ->  POST .../ai-search/namespaces/default/instances/rag/items
+                ->  AI Search chunks + embeds it server-side
 ```
 
-Nothing leaves the machine. Postgres and Ollama are both loopback.
+**Where the data goes:** Cloudflare-hosted, private. The instance's public endpoint is off; it is
+reached only with a scoped Cloudflare API token (AI Search Edit + Run). The token comes from
+`$CLOUDFLARE_AI_SEARCH_TOKEN`, else the macOS login Keychain item `cf:cloudflare.com:ai-search`.
+The account id comes from `$CF_ACCOUNT_ID` — per-person data, never stored in this repo.
 
 ## Usage
 
 ```bash
-# dry run: extract and chunk, write nothing
-nix run .#ingest -- --url-file sources/workspace-studio.txt \
-  --collection workspace-studio --dry-run
+# dry run: fetch and extract, print each item key and size, upload nothing (no credentials needed)
+nix run .#ingest -- --url-file sources/workspace-studio.txt --dry-run
 
-# real ingest (idempotent — re-running replaces that source's rows)
-nix run .#ingest -- --url-file sources/workspace-studio.txt \
-  --collection workspace-studio
+# real ingest (idempotent — the key is derived from the URL, and an upload is an upsert)
+CF_ACCOUNT_ID=<account id> nix run .#ingest -- --url-file sources/workspace-studio.txt
 
 # one-off URLs
-nix run .#ingest -- https://example.com/docs/page --collection my-notes
+CF_ACCOUNT_ID=<account id> nix run .#ingest -- https://example.com/docs/page
 
-# point at a different store (defaults: $XDG_DATA_HOME or ~/.local/share,
-# /postgres-pgvector, port 5433, database ragdb)
-RAGDB_SOCKET_DIR=/path/to/socketdir RAGDB_PORT=5433 RAGDB_DATABASE=ragdb \
-  nix run .#ingest -- --url-file sources/workspace-studio.txt --collection workspace-studio
+# contract tests (no network: urllib and the Keychain call are stubbed)
+nix develop --command python3 test_ingest.py
 
-# contract tests
-nix develop --command python3 test_chunk.py
-
-# retrieval benchmark — the only check that sees a quality regression
-./bench.sh workspace-studio
-./bench.sh nix-darwin
+# retrieval benchmark — the only check that sees a quality regression (live API)
+CF_ACCOUNT_ID=<account id> nix develop --command ./bench.sh workspace-studio
+CF_ACCOUNT_ID=<account id> nix develop --command ./bench.sh nix-darwin
 
 # parallel ingest (shards a URL list across N workers)
-./ingest-parallel.sh <collection> <url-file> [jobs]
+./ingest-parallel.sh [--dry-run] <url-file> [jobs]
 ```
 
-Query it with the `rag` skill, or directly:
+Query it through the claude.ai Cloudflare connector, or directly:
 
-```sql
-SELECT content, metadata, 1 - (embedding <=> embed($1)) AS similarity
-FROM docs
-WHERE metadata->>'collection' = 'workspace-studio'
-ORDER BY embedding <=> embed($1)
-LIMIT 8;
+```bash
+POST https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/ai-search/namespaces/default/instances/rag/search
+{"query": "...", "ai_search_options": {"retrieval": {"max_num_results": 8, "filters": {"corpus": "web"}}}}
 ```
 
-## The store is SHARED — always set `--collection`
+## The instance is SHARED — filter on `corpus`
 
-`ragdb.docs` is not this project's private table. It is a shared corpus, and at the time of
-writing it already held several thousand rows from unrelated collections. Every row this
-pipeline writes carries `metadata.collection`, and every query above filters on it. Without that
-filter, a Workspace Studio question retrieves whatever else happens to be semantically close —
-from a completely different corpus, with a confident-looking similarity score.
+`rag` is not this project's private index: it holds the operator's other corpora too (`ircc`,
+`repo`, `misc`, ...). Every item this pipeline writes carries `corpus=web`, and a query should
+filter on it. Without that filter, a Workspace Studio question retrieves whatever else happens to
+be semantically close, with a confident-looking score.
 
-Pre-existing rows have no `collection` key at all, so they are easy to tell apart — and this
-pipeline never touches them: re-ingest deletes only by exact `metadata->>'source'`.
+## Item contract
+
+| Part | Value |
+|---|---|
+| key | `item_key("web", url)` — `web/<slug of the URL>-<sha1[:10]>.md`, ≤128 chars, byte for byte the corpus export's formula. Pinned by a test. |
+| body | `# {title}\n\nSource: {url}\n\n{page text}\n` — the export's format |
+| metadata | `{"corpus": "web", "source": url, "url": url, "title": title}`, each ≤256 chars; the instance's only filterable fields are `corpus`, `source`, `url`, `repo`, `title` |
 
 ## Design decisions
 
 | Choice | Why, and what lost |
 |---|---|
 | **trafilatura** for extraction | Purpose-built boilerplate removal, markdown output. **pandoc** (already on PATH) converts the whole document, so a devsite page's nav, breadcrumb and footer land in the corpus as text — on these pages the article body is a small fraction of 172 KB of HTML. A hand-rolled `html.parser` reinvents a genuinely hard wheel. |
-| **Embed in Postgres** via `embed()` | The `rag` skill's contract. One fixed model (`nomic-embed-text`, 768-dim) on both the ingest and query side, so they can never drift apart. Computing vectors in Python would introduce a second path. |
-| **`langchain-text-splitters` for chunking** | The chunker was hand-rolled first — and it was the one layer with a mature off-the-shelf answer sitting in nixpkgs the whole time. `RecursiveCharacterTextSplitter` is the standalone package (no agent framework, no LLM client, no vector-store opinion). **Measured: the swap is free** — mean top-1 similarity 0.737 → 0.738 across the 6 probes in `probes/workspace-studio.txt`, each landing on the same page as before, while deleting ~60 lines that had shipped two bugs. Re-run with `./bench.sh workspace-studio`. |
-| **~900 chars, 150 overlap** | Top of the skill's 500–1000 band: keeps a whole procedure step together while leaving the splitter room to find a natural boundary. Measured result: median chunk 821 chars. |
-| **Chunk size stays at the skill's 500–1000 band** | Tested, not assumed. On the nix-darwin option manual, larger chunks measurably improve a proxy — option names separated from their `Type:` line drop from 21.7% at 900 chars to 15.2% at 1500 and 12.6% at 2000 — but retrieval did **not** move: 1500/250 scored a mean of 0.667, identical to 900/150. The proxy does not predict quality, so precedent wins. `--chunk-size`/`--chunk-overlap` exist so the next source can be measured rather than argued about. |
-| **Separator tuning REJECTED** | Adding an option-entry boundary separator made things *worse* — orphans 21.7% → 27.0%, because more split points meant smaller chunks and more mid-option breaks. Recorded so it is not retried. |
-| **DELETE-then-INSERT per source, one transaction** | Makes re-running idempotent instead of additive. Stale chunks from a changed page are the quiet way a corpus rots. |
-| **`nix run`, no requirements.txt** | Both dependencies are in nixpkgs. Nothing to install, no virtualenv to drift, reproducible across the fleet. |
+| **One item per page, no local chunking** | AI Search chunks and embeds each item itself, with one pinned embedding model on both the ingest and query side. Chunking here as well would only make AI Search chunk the chunks. The old `langchain-text-splitters` layer and its contract test went with it. |
+| **Key derived from the URL** | An upload to an existing key returns the same item id: it is an upsert, so re-running replaces a page instead of adding a duplicate. That is what the old DELETE-then-INSERT achieved, with no transaction to manage. |
+| **stdlib `urllib` multipart** | Two fixed form parts. A `requests` dependency would be bigger than the problem. |
+| **Retry 429/5xx, fail fast on other 4xx** | A rate limit or server error gets better with backoff; a bad token or a rejected item does not. A run exits non-zero and lists every failed URL. |
+| **`nix run`, no requirements.txt** | The one dependency is in nixpkgs. Nothing to install, no virtualenv to drift, reproducible across the fleet. |
 
 ## Source discovery
 
@@ -115,18 +113,12 @@ HTML, so HTML extraction is the only route. Re-run that command to pick up new p
 
 ## Gotchas
 
-- **Connect by unix socket, not TCP.** Postgres listens on `127.0.0.1:5433`, but `pg_hba.conf`
-  has no host entry, so a TCP DSN fails with `no pg_hba.conf entry` even though the port is open.
-  The socket directory is `~/.local/share/postgres-pgvector`.
-- **`pg_stat_user_tables.n_live_tup` is an estimate, and it lied.** It reported `docs` as empty
-  when the table in fact held several thousand rows, which nearly produced a confident and wrong
-  "the corpus is empty". Count with `SELECT count(*)` before concluding anything about a corpus.
-- **Don't hand-roll the chunker** — this repo did, and paid for it. The custom splitter shipped
-  an infinite loop (the run hung with *no output*, because Python block-buffers stdout to a
-  pipe) and a sentence-boundary backtrack that turned 10,934 chars into 158 fragments with a
-  median length of 120. It was then replaced by `RecursiveCharacterTextSplitter` at **zero
-  measured retrieval cost**. `test_chunk.py` survives as a CONTRACT test over whatever
-  implements the split.
-- **A runt filter that drops is lossy.** Discarding sub-threshold fragments silently deleted a
-  paragraph's opening words when the splitter isolated them — caught by the contract test, not
-  by reading the code. Runts are coalesced into a neighbour now; nothing is discarded.
+- **Never change `item_key`.** A key that differs by one byte creates a second item for the same
+  page, and the old copy lives on as a stale duplicate. `test_ingest.py` pins a verified example.
+- **`bench.sh` scores are not the old cosine scores.** AI Search reports its own 0–1 relevance
+  (hybrid vector + keyword), so the pgvector baselines recorded in `probes/*.txt` before
+  2026-11-19 do not carry over. Both collections share `corpus=web`, so a probe can land on the
+  other collection's page: read the title, not just the number.
+- **Don't hand-roll the extractor or the chunker.** This repo once hand-rolled a chunker, and it
+  shipped an infinite loop and a fragment explosion before being replaced. Chunking is now
+  AI Search's job entirely.
