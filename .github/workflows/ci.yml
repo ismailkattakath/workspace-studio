@@ -3,17 +3,15 @@
 # WHAT THIS CAN AND CANNOT CHECK, stated up front so nobody reads a green tick
 # as more than it is:
 #
-#   CAN  — the flake evaluates, the ingest app builds, and the chunker contract
-#          tests pass. Those tests are the ones that actually caught bugs: an
-#          infinite loop, a fragment explosion, and a runt filter that silently
-#          deleted content. All three are pure-Python and need no services.
+#   CAN  — the flake evaluates, the ingest app builds, and the ingest contract
+#          tests pass: the item key matches the corpus export byte for byte, the
+#          body format, the multipart upload and its retry policy. They are
+#          pure-Python, stub the network, and need no services or secrets.
 #
-#   CANNOT — retrieval quality. `./bench.sh` needs Postgres + pgvector + an
-#          Ollama model, and the model alone is a multi-gigabyte pull per run.
-#          Standing that up on a hosted runner would cost more than it proves,
-#          and it would prove it against a DIFFERENT corpus than the real store.
-#          The benchmark stays a local gate (CLAUDE.md § Verifying a change) and
-#          this file does not pretend otherwise.
+#   CANNOT — retrieval quality, or a real upload. Both need the private AI
+#          Search instance and a scoped Cloudflare token, which CI does not hold
+#          on purpose. The benchmark stays a local gate (CLAUDE.md § Verifying a
+#          change) and this file does not pretend otherwise.
 #
 # CONVENTIONS COPIED, NOT INVENTED: action SHAs pinned with a version comment,
 # DeterminateSystems/determinate-nix-action, least-privilege permissions,
@@ -81,16 +79,15 @@ jobs:
       - name: Build the ingest app
         run: nix build .#ingest --no-link --print-out-paths
 
-      # The real gate. These assert this repo's own policy (runts are coalesced,
-      # never dropped) and keep two regression inputs pointed at whatever
-      # implements the split — a pinned dependency can change behaviour across
-      # versions without failing anything loudly.
-      - name: Chunker contract tests
-        run: nix develop --command python3 test_chunk.py
+      # The real gate. The key test is the one that matters most: a key that
+      # drifts by one byte makes a re-ingest ADD a duplicate item instead of
+      # replacing the page.
+      - name: Ingest contract tests
+        run: nix develop --command python3 test_ingest.py
 
       # Extraction is the layer most likely to break without any code change,
-      # because it depends on a third party's HTML. A dry run writes nothing and
-      # touches no database; it just proves pages still yield an article body.
+      # because it depends on a third party's HTML. A dry run uploads nothing and
+      # needs no credentials; it just proves pages still yield an article body.
       #
       # NON-BLOCKING ON PURPOSE: this reaches the public internet, so a network
       # blip or an upstream redesign would otherwise fail a PR that changed
@@ -99,5 +96,4 @@ jobs:
         continue-on-error: true
         run: |
           nix run .#ingest -- \
-            https://developers.google.com/workspace/add-ons/studio \
-            --collection ci-smoke --dry-run
+            https://developers.google.com/workspace/add-ons/studio --dry-run

@@ -1,5 +1,9 @@
 # Retrieval probes for the `workspace-studio` collection.
 #
+# 2026-11-19: the corpus moved from local pgvector to Cloudflare AI Search. Every
+# baseline below is a pgvector COSINE score and does not carry over; the first
+# ./bench.sh run against AI Search sets the new baseline — record it here.
+#
 # A fixed query set is the only way a retrieval regression is visible: changes to
 # extraction, chunking or embedding do not show up in a diff. Run these before and
 # after such a change and compare top-1 cosine similarity AND the page each hit
