@@ -30,7 +30,7 @@
       imports = [ repo-kit.flakeModules.default ];
 
       repoKit = {
-        name = "workspace-studio";
+        name = "free-rag";
         license = {
           spdx = "MIT";
           year = "2026";

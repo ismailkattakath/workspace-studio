@@ -1,7 +1,7 @@
-# workspace-studio
+# free-rag
 
-[![CI status](https://github.com/ismailkattakath/workspace-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/ismailkattakath/workspace-studio/actions/workflows/ci.yml)
-[![License](https://img.shields.io/github/license/ismailkattakath/workspace-studio)](LICENSE)
+[![CI status](https://github.com/ismailkattakath/free-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/ismailkattakath/free-rag/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/ismailkattakath/free-rag)](LICENSE)
 
 Ingests web documentation into a private Cloudflare AI Search instance, one item per page, for retrieval from Claude
 
@@ -15,7 +15,7 @@ fetch (urllib) -> extract (trafilatura -> markdown) -> one item per page
                -> AI Search chunks + embeds it
 ```
 
-The repo name is historical: the first collection was the Google Workspace Studio docs.
+The first collection was the Google Workspace Studio docs; `sources/` holds one URL list per collection.
 
 ## Background
 

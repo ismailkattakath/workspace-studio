@@ -50,7 +50,7 @@ ACCOUNT_ENV = "CF_ACCOUNT_ID"
 METADATA_MAX = 256  # the API's per-value limit on filterable metadata
 KEY_MAX = 128  # the API's limit on an item key
 
-USER_AGENT = "workspace-studio-ingest/2.0 (+knowledge base; contact: repo owner)"
+USER_AGENT = "free-rag-ingest/2.0 (+knowledge base; contact: repo owner)"
 
 
 class ConfigError(RuntimeError):

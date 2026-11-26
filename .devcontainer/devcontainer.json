@@ -31,9 +31,9 @@
     }
   },
   "image": "ghcr.io/kattakath/devcontainer:1",
-  "name": "workspace-studio",
+  "name": "free-rag",
   "postCreateCommand": "direnv allow ${containerWorkspaceFolder}",
   "postStartCommand": "git -C / config --global --add safe.directory ${containerWorkspaceFolder}",
-  "workspaceFolder": "/workspaces/workspace-studio",
-  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/workspace-studio,type=bind"
+  "workspaceFolder": "/workspaces/free-rag",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/free-rag,type=bind"
 }
