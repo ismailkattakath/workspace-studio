@@ -99,23 +99,8 @@ jobs:
           nix run .#ingest -- \
             https://developers.google.com/workspace/add-ons/studio --dry-run
 
-  # repo-kit's flake-check (github:ismailkattakath/repo-kit ci.yml): every check on both
-  # Linux arches — toolchain-complete, treefmt, project-gate and each generated file's
-  # drift check (files:<path>).
+  # Every flake check on both Linux arches, through the ONE shared reusable workflow
+  # (kattakath/.github nix-flake-check.yml): the devShell's toolchain, treefmt, project-gate and each
+  # generated file's drift check (files:<path>).
   flake-check:
-    strategy:
-      fail-fast: false
-      matrix:
-        runner: [ubuntu-24.04-arm, ubuntu-24.04]
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
-        with:
-          extra_nix_config: |
-            experimental-features = nix-command flakes
-      - name: nix flake check
-        run: nix flake check --print-build-logs
+    uses: kattakath/.github/.github/workflows/nix-flake-check.yml@cad98392a903fd89ec732ea116f38ec871e38ac0 # main
