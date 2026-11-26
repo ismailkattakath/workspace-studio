@@ -7,3 +7,4 @@ __pycache__/
 # direnv: the generated .envrc sources both
 .env
 .envrc.local
+.DS_Store
