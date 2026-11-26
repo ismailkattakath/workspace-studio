@@ -25,16 +25,17 @@ name: ci
 # never pass for a green one ("A job that is skipped will report its status as
 # Success", GitHub docs). `check` runs on every PR here: this repo is owned by a
 # personal account, so GitHub offers it no merge queue and QUEUE_ENABLED stays unset.
-# No `push: main` leg: nothing chains off it, and it only re-ran the PR's suite on
-# the same tree after the merge.
 on:
+  # The owner lands by direct push to main, so CI runs there too (the drift checks included).
+  push:
+    branches: [main]
   pull_request:
   merge_group:
     types: [checks_requested]
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.event.pull_request.number || (github.event_name == 'push' && github.sha) || github.ref }}
   # Supersede stale PR runs; never cancel a queue run.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -46,7 +47,7 @@ jobs:
   # give it a `name:`.
   gate:
     if: ${{ !cancelled() }}
-    needs: [check]
+    needs: [check, flake-check]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
@@ -56,7 +57,7 @@ jobs:
         with:
           needs: ${{ toJSON(needs) }}
           expect: >-
-            {"check": ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository || vars.QUEUE_ENABLED != 'true' }}}
+            {"check": ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository || vars.QUEUE_ENABLED != 'true' }}, "flake-check": true}
 
   check:
     name: flake + contract tests
@@ -97,3 +98,24 @@ jobs:
         run: |
           nix run .#ingest -- \
             https://developers.google.com/workspace/add-ons/studio --dry-run
+
+  # repo-kit's flake-check (github:ismailkattakath/repo-kit ci.yml): every check on both
+  # Linux arches — toolchain-complete, treefmt, project-gate and each generated file's
+  # drift check (files:<path>).
+  flake-check:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04-arm, ubuntu-24.04]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: nix flake check
+        run: nix flake check --print-build-logs
